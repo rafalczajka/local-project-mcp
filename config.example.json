@@ -1,0 +1,31 @@
+{
+  "ignore": [
+    "node_modules/",
+    "vendor/",
+    "dist/",
+    "build/",
+    "coverage/",
+    ".next/",
+    ".cache/",
+    "target/"
+  ],
+  "sensitive": ["private/**", "*.token"],
+  "respectGitignore": true,
+  "allowedHosts": [],
+  "allowedOrigins": [],
+  "limits": {
+    "fileBytes": 2097152,
+    "readBytes": 65536,
+    "batchBytes": 262144,
+    "batchFiles": 10,
+    "searchResults": 100,
+    "treeEntries": 500,
+    "treeDepth": 6,
+    "gitBytes": 131072,
+    "timeoutMs": 10000,
+    "scanEntries": 20000,
+    "scanBytes": 33554432,
+    "outputBytes": 1048576,
+    "concurrency": 4
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "local-project-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bounded, read-only MCP access to one local software project",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx src/server.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "ignore": "^7.0.10",
+    "minimatch": "^10.2.6",
+    "re2-wasm": "^1.0.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "prettier": "^3.9.9",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
