@@ -5,6 +5,116 @@ import { clip, ProjectError } from '../errors.js';
 import { isInside } from '../security/paths.js';
 import type { FileService } from './filesystem.js';
 
+const MAX_CONFIG_BYTES = 64 * 1024;
+const MAX_METADATA_DEPTH = 32;
+const UNSUPPORTED_METADATA = new Set([
+  'alternates',
+  'http-alternates',
+  'commondir',
+  'gitdir',
+  'grafts',
+  'shallow',
+]);
+
+interface GitOutput {
+  text: string;
+  truncated: boolean;
+}
+interface StatusEntry {
+  path: string;
+  status: string;
+}
+
+function gitEnvironment(binary: string): NodeJS.ProcessEnv {
+  const nullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null';
+  return {
+    PATH: path.dirname(binary),
+    ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_SYSTEM: nullDevice,
+    GIT_CONFIG_GLOBAL: nullDevice,
+    GIT_ATTR_NOSYSTEM: '1',
+    GIT_OPTIONAL_LOCKS: '0',
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_NO_LAZY_FETCH: '1',
+    GIT_NO_REPLACE_OBJECTS: '1',
+    GIT_LITERAL_PATHSPECS: '1',
+    GIT_PAGER: '',
+    LC_ALL: 'C',
+  };
+}
+
+function gitArguments(root: string): string[] {
+  const nullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null';
+  return [
+    '--no-pager',
+    '--no-optional-locks',
+    `--git-dir=${path.join(root, '.git')}`,
+    `--work-tree=${root}`,
+    '-c',
+    'core.fsmonitor=false',
+    '-c',
+    `core.hooksPath=${nullDevice}`,
+    '-c',
+    `core.attributesFile=${nullDevice}`,
+    '-c',
+    `core.excludesFile=${nullDevice}`,
+    '-c',
+    'core.untrackedCache=false',
+    '-c',
+    'core.quotePath=true',
+    '-c',
+    'color.ui=false',
+    '-c',
+    'diff.renames=false',
+    '-c',
+    'diff.ignoreSubmodules=all',
+    '-c',
+    'submodule.recurse=false',
+    '-c',
+    'protocol.allow=never',
+    '-c',
+    'maintenance.auto=false',
+    '-c',
+    'gc.auto=0',
+  ];
+}
+
+// Keep only terminated records: a killed process can leave a partial final record.
+function completeRecords(text: string): string[] {
+  return text.split('\0').slice(0, -1);
+}
+
+interface GitIndex {
+  tracked: Set<string>;
+  submodules: Set<string>;
+}
+
+function parseIndex(text: string): GitIndex {
+  const tracked = new Set<string>();
+  const submodules = new Set<string>();
+  for (const record of completeRecords(text)) {
+    const file = record.slice(record.indexOf('\t') + 1);
+    tracked.add(file);
+    if (record.startsWith('160000 ')) submodules.add(file);
+  }
+  return { tracked, submodules };
+}
+
+function* changedFiles(text: string) {
+  const records = completeRecords(text);
+  for (let i = 0; i + 1 < records.length; i += 2) {
+    const fields = records[i]!.split(' ');
+    const modes = [fields[0]?.slice(1), fields[1]];
+    yield {
+      path: records[i + 1]!,
+      regular: modes.every(
+        (mode) => mode === '000000' || mode === '100644' || mode === '100755',
+      ),
+    };
+  }
+}
+
 // Conservative config parser: unsupported syntax/config fails closed, before invoking Git.
 // In particular includes, filters, fsmonitor, external diffs, and partial-clone remotes cannot run.
 const configKeys: Record<string, string[]> = {
@@ -56,8 +166,19 @@ function unsafeRepo() {
 export class GitService {
   private binary = '';
   constructor(private readonly fs: FileService) {}
-  private async prepare() {
+  private async prepare(): Promise<void> {
     this.fs.budget.check();
+    await this.validateRepositoryDirectory();
+    await this.inspectMetadata();
+    validateGitConfig(
+      (await this.fs.paths.read('.git/config', MAX_CONFIG_BYTES)).toString(
+        'utf8',
+      ),
+    );
+    await this.locateExecutable();
+  }
+
+  private async validateRepositoryDirectory(): Promise<void> {
     let gitDirectory;
     try {
       gitDirectory = await this.fs.paths.resolve('.git');
@@ -70,9 +191,12 @@ export class GitService {
       throw unsafeRepo();
     }
     if (!(await lstat(gitDirectory.absolute)).isDirectory()) throw unsafeRepo();
+  }
+
+  private async inspectMetadata(): Promise<void> {
     let entries = 0;
     const inspect = async (relative: string, depth: number): Promise<void> => {
-      if (depth > 32) throw unsafeRepo();
+      if (depth > MAX_METADATA_DEPTH) throw unsafeRepo();
       const dir = await opendir(
         (await this.fs.paths.resolve(relative)).absolute,
       );
@@ -86,14 +210,7 @@ export class GitService {
             );
           const child = `${relative}/${entry.name}`;
           if (
-            [
-              'alternates',
-              'http-alternates',
-              'commondir',
-              'gitdir',
-              'grafts',
-              'shallow',
-            ].includes(entry.name) ||
+            UNSUPPORTED_METADATA.has(entry.name) ||
             entry.name.endsWith('.promisor')
           )
             throw unsafeRepo();
@@ -110,9 +227,9 @@ export class GitService {
       }
     };
     await inspect('.git', 0);
-    validateGitConfig(
-      (await this.fs.paths.read('.git/config', 64 * 1024)).toString('utf8'),
-    );
+  }
+
+  private async locateExecutable(): Promise<void> {
     // Resolve a trusted installed executable, never an executable in the inspected project.
     for (const directory of (process.env.PATH ?? '').split(path.delimiter)) {
       if (!path.isAbsolute(directory)) continue;
@@ -143,56 +260,10 @@ export class GitService {
   private run(
     args: string[],
     limit = this.fs.config.limits.gitBytes,
-  ): Promise<{ text: string; truncated: boolean }> {
+  ): Promise<GitOutput> {
     this.fs.budget.check();
-    const nullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null';
-    const env: NodeJS.ProcessEnv = {
-      PATH: path.dirname(this.binary),
-      ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-      GIT_CONFIG_NOSYSTEM: '1',
-      GIT_CONFIG_SYSTEM: nullDevice,
-      GIT_CONFIG_GLOBAL: nullDevice,
-      GIT_ATTR_NOSYSTEM: '1',
-      GIT_OPTIONAL_LOCKS: '0',
-      GIT_TERMINAL_PROMPT: '0',
-      GIT_NO_LAZY_FETCH: '1',
-      GIT_NO_REPLACE_OBJECTS: '1',
-      GIT_LITERAL_PATHSPECS: '1',
-      GIT_PAGER: '',
-      LC_ALL: 'C',
-    };
-    const fixed = [
-      '--no-pager',
-      '--no-optional-locks',
-      `--git-dir=${path.join(this.fs.config.root, '.git')}`,
-      `--work-tree=${this.fs.config.root}`,
-      '-c',
-      'core.fsmonitor=false',
-      '-c',
-      `core.hooksPath=${nullDevice}`,
-      '-c',
-      `core.attributesFile=${nullDevice}`,
-      '-c',
-      `core.excludesFile=${nullDevice}`,
-      '-c',
-      'core.untrackedCache=false',
-      '-c',
-      'core.quotePath=true',
-      '-c',
-      'color.ui=false',
-      '-c',
-      'diff.renames=false',
-      '-c',
-      'diff.ignoreSubmodules=all',
-      '-c',
-      'submodule.recurse=false',
-      '-c',
-      'protocol.allow=never',
-      '-c',
-      'maintenance.auto=false',
-      '-c',
-      'gc.auto=0',
-    ];
+    const env = gitEnvironment(this.binary);
+    const fixed = gitArguments(this.fs.config.root);
     return new Promise((resolve, reject) => {
       const child = spawn(this.binary, [...fixed, ...args], {
         cwd: this.fs.config.root,
@@ -280,49 +351,53 @@ export class GitService {
       '--ignore-submodules=all',
       '--no-renames',
     ]);
-    const entries: { path: string; status: string }[] = [];
+    const status = await this.filterTrackedStatus(result);
+    const index = await this.run(['ls-files', '--stage', '-z']);
+    status.truncated ||= index.truncated;
+    if (!status.truncated) {
+      const summary = await this.appendUntrackedFiles(
+        status.entries,
+        parseIndex(index.text),
+      );
+      status.omitted += summary.omitted;
+      status.truncated ||= summary.truncated;
+    }
+    return status;
+  }
+
+  private async filterTrackedStatus(result: GitOutput) {
+    const entries: StatusEntry[] = [];
     let omitted = 0;
-    // A killed process may leave an incomplete last NUL record; never expose it.
-    const records = result.text.split('\0').slice(0, -1);
-    for (const record of records) {
+    for (const record of completeRecords(result.text)) {
       this.fs.budget.check();
       const file = record.slice(3);
       if (await this.allowed(file))
         entries.push({ path: file, status: record.slice(0, 2) });
       else omitted++;
     }
+    return { entries, omitted, truncated: result.truncated };
+  }
+
+  private async appendUntrackedFiles(entries: StatusEntry[], index: GitIndex) {
     // Git's untracked discovery can inspect nested repository pointers. Enumerate
     // those paths ourselves, using the same containment/ignore policy as reads.
-    const index = await this.run(['ls-files', '--stage', '-z']);
-    let truncated = result.truncated || index.truncated;
-    if (!truncated) {
-      const tracked = new Set<string>();
-      const submodules = new Set<string>();
-      for (const record of index.text.split('\0').slice(0, -1)) {
-        const file = record.slice(record.indexOf('\t') + 1);
-        tracked.add(file);
-        if (record.startsWith('160000 ')) submodules.add(file);
-      }
-      let size = Buffer.byteLength(JSON.stringify(entries));
-      const summary = await this.fs.walk(
-        '.',
-        { depth: 64, includeHidden: true },
-        async (entry) => {
-          if (submodules.has(entry.path)) return 'skip';
-          if (entry.type === 'file' && !tracked.has(entry.path)) {
-            const item = { path: entry.path, status: '??' };
-            size += Buffer.byteLength(JSON.stringify(item));
-            if (size > this.fs.config.limits.gitBytes) return false;
-            entries.push(item);
-          }
-          return true;
-        },
-      );
-      omitted += summary.omitted;
-      truncated ||= summary.truncated;
-    }
-    return { entries, omitted, truncated };
+    let size = Buffer.byteLength(JSON.stringify(entries));
+    return this.fs.walk(
+      '.',
+      { depth: 64, includeHidden: true },
+      async (entry) => {
+        if (index.submodules.has(entry.path)) return 'skip';
+        if (entry.type === 'file' && !index.tracked.has(entry.path)) {
+          const item = { path: entry.path, status: '??' };
+          size += Buffer.byteLength(JSON.stringify(item));
+          if (size > this.fs.config.limits.gitBytes) return false;
+          entries.push(item);
+        }
+        return true;
+      },
+    );
   }
+
   async diff(input: { path?: string; staged?: boolean }) {
     const scope = await this.pathspec(input.path);
     await this.prepare();
@@ -335,20 +410,12 @@ export class GitService {
       '--ignore-submodules=all',
     ];
     const changed = await this.run([...base, '--raw', '-z', '--', scope]);
-    const records = changed.text.split('\0').slice(0, -1);
     let text = '',
       omitted = 0,
       truncated = changed.truncated;
-    for (let i = 0; i + 1 < records.length; i += 2) {
-      const fields = records[i]!.split(' ');
-      const file = records[i + 1]!;
-      const modes = [fields[0]?.slice(1), fields[1]];
-      if (
-        modes.some(
-          (mode) => mode !== '000000' && mode !== '100644' && mode !== '100755',
-        ) ||
-        !(await this.allowed(file))
-      ) {
+    for (const change of changedFiles(changed.text)) {
+      const file = change.path;
+      if (!change.regular || !(await this.allowed(file))) {
         omitted++;
         continue;
       }
@@ -390,7 +457,7 @@ export class GitService {
       '--',
       scope,
     ]);
-    const fields = result.text.split('\0').slice(0, -1);
+    const fields = completeRecords(result.text);
     const commits = [];
     for (let i = 0; i + 3 < fields.length; i += 4)
       commits.push({

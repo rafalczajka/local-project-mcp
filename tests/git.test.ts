@@ -126,3 +126,66 @@ test('Git diff output cap is explicit', async (t) => {
   assert.equal(result.truncated, true);
   assert.ok(Buffer.byteLength(result.text) <= 512);
 });
+
+test('truncated index does not misclassify tracked files as untracked', async (t) => {
+  const { config, put, git, initGit } = await fixture(t);
+  initGit();
+  await put('tracked.ts', 'tracked\n');
+  git('add', '.');
+  git('commit', '-m', 'Initial');
+  await put('untracked.ts', 'untracked\n');
+  config.limits.gitBytes = 8;
+  const result = await new GitService(new FileService(config)).status();
+  assert.deepEqual(result.entries, []);
+  assert.equal(result.truncated, true);
+});
+
+test('Git status skips submodule contents while retaining ordinary untracked files', async (t) => {
+  const { config, put, git, initGit } = await fixture(t);
+  initGit();
+  await put('tracked.ts', 'tracked\n');
+  git('add', '.');
+  git('commit', '-m', 'Initial');
+  const commit = git('rev-parse', 'HEAD').trim();
+  git('update-index', '--add', '--cacheinfo', `160000,${commit},module`);
+  await put('module/inside.ts', 'submodule content\n');
+  await put('untracked.ts', 'ordinary content\n');
+  const result = await new GitService(new FileService(config)).status();
+  assert.ok(
+    result.entries.some(
+      (entry) => entry.path === 'untracked.ts' && entry.status === '??',
+    ),
+  );
+  assert.ok(!result.entries.some((entry) => entry.path.startsWith('module/')));
+});
+
+test('Git paths remain literal and logs discard incomplete commit records', async (t) => {
+  const { config, put, git, initGit } = await fixture(t);
+  initGit();
+  await put('[source].ts', 'before\n');
+  await put('s.ts', 'other\n');
+  git('add', '.');
+  git('commit', '-m', 'Initial');
+  await put('[source].ts', 'after\n');
+  await put('s.ts', 'unrelated change\n');
+  const result = await new GitService(new FileService(config)).diff({
+    path: '[source].ts',
+  });
+  assert.match(result.text, /\+after/);
+  assert.ok(!result.text.includes('unrelated change'));
+  config.limits.gitBytes = 45;
+  const history = await new GitService(new FileService(config)).log({});
+  assert.deepEqual(history.commits, []);
+  assert.equal(history.truncated, true);
+});
+
+test('Git config parser preserves supported syntax and rejects continuations', () => {
+  assert.doesNotThrow(() =>
+    validateGitConfig(
+      '# comment\n[core]\n bare = false\n[user]\nname = Test\n[remote "origin"]\nurl = https://example.invalid/repo\n',
+    ),
+  );
+  assert.throws(() => validateGitConfig('[core]\nfilemode = true\\\n'), {
+    code: 'UNSAFE_REPOSITORY',
+  });
+});
