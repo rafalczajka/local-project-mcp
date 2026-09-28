@@ -1,3 +1,4 @@
+import type { Dirent } from 'node:fs';
 import { lstat, opendir } from 'node:fs/promises';
 import path from 'node:path';
 import { minimatch } from 'minimatch';
@@ -28,6 +29,44 @@ export type FileRequest = {
 };
 export type Entry = { path: string; type: 'directory' | 'file'; depth: number };
 
+type WalkOptions = { depth: number; includeHidden: boolean };
+type EntryVisitor = (entry: Entry) => Promise<boolean | 'skip'>;
+
+function formatLineRange(
+  source: string,
+  input: FileRequest,
+  maxBytes: number,
+  budget: Budget,
+) {
+  const lines = source.length === 0 ? [] : source.split(/\r?\n/);
+  if (source.endsWith('\n')) lines.pop();
+  const start = input.startLine ?? 1;
+  const end = Math.min(input.endLine ?? lines.length, lines.length);
+  let text = '';
+  let lastLine = start - 1;
+  let truncated = false;
+  for (let line = start; line <= end; line++) {
+    budget.check();
+    const next = `${line} | ${lines[line - 1]}\n`;
+    const remaining = maxBytes - Buffer.byteLength(text);
+    if (Buffer.byteLength(next) > remaining) {
+      text += clip(next, remaining);
+      if (remaining > 0) lastLine = line;
+      truncated = true;
+      break;
+    }
+    text += next;
+    lastLine = line;
+  }
+  return {
+    startLine: start,
+    endLine: lastLine >= start ? lastLine : null,
+    totalLines: lines.length,
+    text,
+    truncated,
+  };
+}
+
 export class FileService {
   readonly paths: Paths;
   readonly policy: Policy;
@@ -52,34 +91,8 @@ export class FileService {
         'endLine must be at least startLine.',
       );
     const source = await this.text(input.path);
-    const lines = source.length === 0 ? [] : source.split(/\r?\n/);
-    if (source.endsWith('\n')) lines.pop();
-    const start = input.startLine ?? 1;
-    const end = Math.min(input.endLine ?? lines.length, lines.length);
-    let text = '';
-    let lastLine = start - 1;
-    let truncated = false;
-    for (let line = start; line <= end; line++) {
-      this.budget.check();
-      const next = `${line} | ${lines[line - 1]}\n`;
-      const remaining = maxBytes - Buffer.byteLength(text);
-      if (Buffer.byteLength(next) > remaining) {
-        text += clip(next, remaining);
-        if (remaining > 0) lastLine = line;
-        truncated = true;
-        break;
-      }
-      text += next;
-      lastLine = line;
-    }
-    return {
-      path: (await this.paths.resolve(input.path)).relative,
-      startLine: start,
-      endLine: lastLine >= start ? lastLine : null,
-      totalLines: lines.length,
-      text,
-      truncated,
-    };
+    const result = formatLineRange(source, input, maxBytes, this.budget);
+    return { path: (await this.paths.resolve(input.path)).relative, ...result };
   }
   async readFiles(files: FileRequest[]) {
     let remaining = this.config.limits.batchBytes;
@@ -109,9 +122,7 @@ export class FileService {
     };
   }
   async info(input: string) {
-    const target = await this.policy.resolve(input);
-    const info = await lstat(target.absolute);
-    await this.policy.assert(input, info.isDirectory());
+    const { target, stat: info } = await this.inspectPath(input);
     let binary: boolean | null = null;
     if (info.isFile() && info.size <= this.config.limits.fileBytes) {
       try {
@@ -132,14 +143,32 @@ export class FileService {
       extension: path.extname(target.relative) || null,
     };
   }
-  async walk(
-    input: string,
-    options: { depth: number; includeHidden: boolean },
-    visit: (entry: Entry) => Promise<boolean | 'skip'>,
-  ) {
+  private async inspectPath(input: string) {
     const target = await this.policy.resolve(input);
     const stat = await lstat(target.absolute);
     await this.policy.assert(input, stat.isDirectory());
+    return { target, stat };
+  }
+
+  private async canVisitChild(input: string, child: Dirent): Promise<boolean> {
+    try {
+      await this.policy.assert(input, child.isDirectory());
+      await this.paths.resolve(input);
+    } catch (error) {
+      if (
+        error instanceof ProjectError ||
+        ['ENOENT', 'EACCES', 'EPERM'].includes(
+          (error as NodeJS.ErrnoException).code ?? '',
+        )
+      )
+        return false;
+      throw error;
+    }
+    return child.isFile() || child.isDirectory();
+  }
+
+  async walk(input: string, options: WalkOptions, visit: EntryVisitor) {
+    const { target, stat } = await this.inspectPath(input);
     let truncated = false;
     let omitted = 0;
     let stopped = false;
@@ -160,22 +189,7 @@ export class FileService {
             omitted++;
             continue;
           }
-          try {
-            await this.policy.assert(childPath, child.isDirectory());
-            await this.paths.resolve(childPath);
-          } catch (error) {
-            if (
-              error instanceof ProjectError ||
-              ['ENOENT', 'EACCES', 'EPERM'].includes(
-                (error as NodeJS.ErrnoException).code ?? '',
-              )
-            ) {
-              omitted++;
-              continue;
-            }
-            throw error;
-          }
-          if (!child.isFile() && !child.isDirectory()) {
+          if (!(await this.canVisitChild(childPath, child))) {
             omitted++;
             continue;
           }
