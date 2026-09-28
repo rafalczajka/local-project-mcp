@@ -2,6 +2,9 @@
 
 Read-only MCP server for secure access to local project files. Inspect structure, read selected source ranges, search text, and review Git changes.
 
+> [!WARNING]  
+> This project was mostly vibe-coded. It is designed to be read-only, which limits the risk, but you should still review the code before using it with sensitive projects or files.
+
 ## Requirements and quick start
 
 - Node.js 24 or newer.
@@ -11,12 +14,6 @@ Read-only MCP server for secure access to local project files. Inspect structure
 npm ci
 npm run build
 npm start -- --root /absolute/path/to/your/project
-```
-
-Run the server:
-
-```powershell
-npm start -- --root "C:\Projects\my-app"
 ```
 
 ## Tools and outputs
