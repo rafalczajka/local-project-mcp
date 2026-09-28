@@ -1,11 +1,11 @@
 import { z } from 'zod';
 
 export const errorSchema = z.object({ code: z.string(), message: z.string() });
-const summary = {
+const truncationSummaryShape = {
   truncated: z.boolean(),
   omitted: z.number().int().nonnegative(),
 };
-const file = z.object({
+const fileReadSchema = z.object({
   path: z.string(),
   startLine: z.number().int(),
   endLine: z.number().int().nullable(),
@@ -14,41 +14,51 @@ const file = z.object({
   truncated: z.boolean(),
 });
 
+const treeEntrySchema = z.object({
+  path: z.string(),
+  type: z.enum(['directory', 'file']),
+  depth: z.number().int(),
+});
+
+const batchFileResultSchema = z.union([
+  fileReadSchema.extend({ ok: z.literal(true) }),
+  z.object({ ok: z.literal(false), error: errorSchema }),
+]);
+
+const searchMatchSchema = z.object({
+  path: z.string(),
+  line: z.number().int(),
+  excerpt: z.string(),
+  excerptTruncated: z.boolean(),
+});
+
+const gitCommitSchema = z.object({
+  hash: z.string(),
+  author: z.string(),
+  date: z.string(),
+  subject: z.string(),
+});
+
 // Advertise tool-specific shapes so clients can validate and consume results reliably.
 export const resultSchemas: Record<string, z.ZodType> = {
   project_tree: z.object({
     path: z.string(),
-    entries: z.array(
-      z.object({
-        path: z.string(),
-        type: z.enum(['directory', 'file']),
-        depth: z.number().int(),
-      }),
-    ),
-    ...summary,
+    entries: z.array(treeEntrySchema),
+    ...truncationSummaryShape,
     limits: z.object({ entries: z.number().int(), depth: z.number().int() }),
   }),
-  read_file: file,
+  read_file: fileReadSchema,
   read_files: z.object({
-    files: z.array(
-      z.union([
-        file.extend({ ok: z.literal(true) }),
-        z.object({ ok: z.literal(false), error: errorSchema }),
-      ]),
-    ),
+    files: z.array(batchFileResultSchema),
     truncated: z.boolean(),
   }),
-  find_files: z.object({ files: z.array(z.string()), ...summary }),
+  find_files: z.object({
+    files: z.array(z.string()),
+    ...truncationSummaryShape,
+  }),
   search_text: z.object({
-    matches: z.array(
-      z.object({
-        path: z.string(),
-        line: z.number().int(),
-        excerpt: z.string(),
-        excerptTruncated: z.boolean(),
-      }),
-    ),
-    ...summary,
+    matches: z.array(searchMatchSchema),
+    ...truncationSummaryShape,
     skipped: z.record(z.string(), z.number().int()),
   }),
   file_info: z.object({
@@ -61,18 +71,15 @@ export const resultSchemas: Record<string, z.ZodType> = {
   }),
   git_status: z.object({
     entries: z.array(z.object({ path: z.string(), status: z.string() })),
-    ...summary,
+    ...truncationSummaryShape,
   }),
-  git_diff: z.object({ text: z.string(), staged: z.boolean(), ...summary }),
+  git_diff: z.object({
+    text: z.string(),
+    staged: z.boolean(),
+    ...truncationSummaryShape,
+  }),
   git_log: z.object({
-    commits: z.array(
-      z.object({
-        hash: z.string(),
-        author: z.string(),
-        date: z.string(),
-        subject: z.string(),
-      }),
-    ),
+    commits: z.array(gitCommitSchema),
     truncated: z.boolean(),
   }),
 };
