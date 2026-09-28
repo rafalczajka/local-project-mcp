@@ -66,6 +66,29 @@ export interface Config {
   limits: Limits;
 }
 
+async function resolveProjectRoot(input: string | undefined): Promise<string> {
+  if (!input)
+    throw new Error('Set PROJECT_ROOT or pass --root /path/to/project.');
+  const root = await realpath(input);
+  if (!(await stat(root)).isDirectory())
+    throw new Error('PROJECT_ROOT must be a directory.');
+  return root;
+}
+
+async function loadSettings(file: string | undefined) {
+  const input = file ? JSON.parse(await readFile(file, 'utf8')) : {};
+  return configSchema.parse(input);
+}
+
+function validateBinding(host: string, token: string | undefined): void {
+  if (token && token.length < 32)
+    throw new Error('MCP_BEARER_TOKEN must contain at least 32 characters.');
+  if (!['127.0.0.1', '::1', 'localhost'].includes(host) && !token)
+    throw new Error('Non-loopback binding requires MCP_BEARER_TOKEN.');
+}
+
+const portSchema = z.coerce.number().int().min(1).max(65535);
+
 export async function loadConfig(
   args = process.argv.slice(2),
   env = process.env,
@@ -80,27 +103,12 @@ export async function loadConfig(
     },
     strict: true,
   });
-  const rootInput = values.root ?? env.PROJECT_ROOT;
-  if (!rootInput)
-    throw new Error('Set PROJECT_ROOT or pass --root /path/to/project.');
-  const root = await realpath(rootInput);
-  if (!(await stat(root)).isDirectory())
-    throw new Error('PROJECT_ROOT must be a directory.');
-  const settings = configSchema.parse(
-    values.config ? JSON.parse(await readFile(values.config, 'utf8')) : {},
-  );
+  const root = await resolveProjectRoot(values.root ?? env.PROJECT_ROOT);
+  const settings = await loadSettings(values.config);
   const host = values.host ?? env.HOST ?? '127.0.0.1';
-  const port = z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(65535)
-    .parse(values.port ?? env.PORT ?? 3000);
+  const port = portSchema.parse(values.port ?? env.PORT ?? 3000);
   const token = env.MCP_BEARER_TOKEN;
-  if (token && token.length < 32)
-    throw new Error('MCP_BEARER_TOKEN must contain at least 32 characters.');
-  if (!['127.0.0.1', '::1', 'localhost'].includes(host) && !token)
-    throw new Error('Non-loopback binding requires MCP_BEARER_TOKEN.');
+  validateBinding(host, token);
   return {
     root,
     host,
