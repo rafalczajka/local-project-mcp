@@ -7,9 +7,7 @@ import { defaultIgnores, defaultLimits, type Config } from '../src/config.js';
 import { isInside } from '../src/security/paths.js';
 
 export async function fixture(t: TestContext) {
-  const temp = await realpath(
-    await mkdtemp(path.join(tmpdir(), 'local-project-mcp-test-')),
-  );
+  const temp = await realpath(await mkdtemp(path.join(tmpdir(), 'local-project-mcp-test-')));
   const root = path.join(temp, 'project');
   await mkdir(root);
   t.after(async () => {
@@ -29,7 +27,7 @@ export async function fixture(t: TestContext) {
     respectGitignore: true,
     allowedHosts: [],
     allowedOrigins: [],
-    limits: { ...defaultLimits },
+    limits: { ...defaultLimits }
   };
   const put = async (relative: string, content: string | Buffer) => {
     const target = path.join(root, relative);
@@ -39,11 +37,7 @@ export async function fixture(t: TestContext) {
   const git = (...args: string[]) =>
     execFileSync(
       'git',
-      [
-        '-c',
-        `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
-        ...args,
-      ],
+      ['-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`, ...args],
       {
         cwd: root,
         encoding: 'utf8',
@@ -52,9 +46,9 @@ export async function fixture(t: TestContext) {
           ...process.env,
           GIT_CONFIG_NOSYSTEM: '1',
           GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
-          GIT_TERMINAL_PROMPT: '0',
-        },
-      },
+          GIT_TERMINAL_PROMPT: '0'
+        }
+      }
     );
   const initGit = () => {
     git('init');

@@ -26,19 +26,16 @@ test('Git status, working/staged diffs, log, deletions and sensitive filtering a
   assert.match(diff.text, /value = 2/);
   assert.ok(!diff.text.includes('SECRET'));
   assert.equal(diff.omitted, 1);
-  assert.match(
-    (await service().diff({ staged: true, path: 'deleted.ts' })).text,
-    /delete me/,
-  );
+  assert.match((await service().diff({ staged: true, path: 'deleted.ts' })).text, /delete me/);
   const log = await service().log({ limit: 1 });
   assert.equal(log.commits.length, 1);
-  assert.equal(log.commits[0]!.subject, 'Initial source');
+  assert.equal(log.commits[0]?.subject, 'Initial source');
   assert.deepEqual(await readFile(path.join(root, '.git/index')), before);
   await assert.rejects(service().diff({ path: '.env' }), {
-    code: 'SENSITIVE_PATH',
+    code: 'SENSITIVE_PATH'
   });
   await assert.rejects(service().diff({ path: '../outside' }), {
-    code: 'INVALID_PATH',
+    code: 'INVALID_PATH'
   });
 });
 
@@ -53,7 +50,7 @@ test('Git diff does not follow rename from a sensitive file', async (t) => {
   await put('renamed.txt', 'safe replacement\n');
   git('add', 'renamed.txt');
   const result = await new GitService(new FileService(config)).diff({
-    staged: true,
+    staged: true
   });
   assert.ok(!result.text.includes('SECRET'));
   assert.match(result.text, /safe replacement/);
@@ -67,37 +64,37 @@ test('unsupported Git configs are rejected before execution', async (t) => {
     '[core]\nfsmonitor = malicious\n',
     '[filter "evil"]\nclean = malicious\n',
     '[core]\nworktree = /outside\n',
-    '[remote "origin"]\npromisor = true\n',
+    '[remote "origin"]\npromisor = true\n'
   ]) {
     assert.throws(() => validateGitConfig(source), {
-      code: 'UNSAFE_REPOSITORY',
+      code: 'UNSAFE_REPOSITORY'
     });
   }
   await put('.git/config', '[include]\npath = /outside\n');
   await assert.rejects(new GitService(new FileService(config)).status(), {
-    code: 'UNSAFE_REPOSITORY',
+    code: 'UNSAFE_REPOSITORY'
   });
 });
 
 test('outside Git metadata, alternate object stores and non-repositories fail closed', async (t) => {
   const { config, put, initGit, root, temp } = await fixture(t);
   await assert.rejects(new GitService(new FileService(config)).status(), {
-    code: 'NOT_GIT_REPOSITORY',
+    code: 'NOT_GIT_REPOSITORY'
   });
   initGit();
   await mkdir(path.join(temp, 'outside'));
   await symlink(
     path.join(temp, 'outside'),
     path.join(root, '.git/escape'),
-    process.platform === 'win32' ? 'junction' : 'dir',
+    process.platform === 'win32' ? 'junction' : 'dir'
   );
   await assert.rejects(new GitService(new FileService(config)).status(), {
-    code: 'UNSAFE_REPOSITORY',
+    code: 'UNSAFE_REPOSITORY'
   });
   await unlink(path.join(root, '.git/escape'));
   await put('.git/objects/info/alternates', '/outside');
   await assert.rejects(new GitService(new FileService(config)).diff({}), {
-    code: 'UNSAFE_REPOSITORY',
+    code: 'UNSAFE_REPOSITORY'
   });
 });
 
@@ -108,9 +105,7 @@ test('untracked status uses contained discovery and ignores external nested Git 
   await put('nested/source.ts', 'safe');
   await put('.env', 'SECRET');
   const result = await new GitService(new FileService(config)).status();
-  assert.deepEqual(result.entries, [
-    { path: 'nested/source.ts', status: '??' },
-  ]);
+  assert.deepEqual(result.entries, [{ path: 'nested/source.ts', status: '??' }]);
   assert.equal(result.truncated, false);
 });
 
@@ -151,11 +146,7 @@ test('Git status skips submodule contents while retaining ordinary untracked fil
   await put('module/inside.ts', 'submodule content\n');
   await put('untracked.ts', 'ordinary content\n');
   const result = await new GitService(new FileService(config)).status();
-  assert.ok(
-    result.entries.some(
-      (entry) => entry.path === 'untracked.ts' && entry.status === '??',
-    ),
-  );
+  assert.ok(result.entries.some((entry) => entry.path === 'untracked.ts' && entry.status === '??'));
   assert.ok(!result.entries.some((entry) => entry.path.startsWith('module/')));
 });
 
@@ -169,7 +160,7 @@ test('Git paths remain literal and logs discard incomplete commit records', asyn
   await put('[source].ts', 'after\n');
   await put('s.ts', 'unrelated change\n');
   const result = await new GitService(new FileService(config)).diff({
-    path: '[source].ts',
+    path: '[source].ts'
   });
   assert.match(result.text, /\+after/);
   assert.ok(!result.text.includes('unrelated change'));
@@ -182,10 +173,10 @@ test('Git paths remain literal and logs discard incomplete commit records', asyn
 test('Git config parser preserves supported syntax and rejects continuations', () => {
   assert.doesNotThrow(() =>
     validateGitConfig(
-      '# comment\n[core]\n bare = false\n[user]\nname = Test\n[remote "origin"]\nurl = https://example.invalid/repo\n',
-    ),
+      '# comment\n[core]\n bare = false\n[user]\nname = Test\n[remote "origin"]\nurl = https://example.invalid/repo\n'
+    )
   );
   assert.throws(() => validateGitConfig('[core]\nfilemode = true\\\n'), {
-    code: 'UNSAFE_REPOSITORY',
+    code: 'UNSAFE_REPOSITORY'
   });
 });

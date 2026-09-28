@@ -22,13 +22,9 @@ test('traversal, absolute paths, alternate streams, device names and ambiguous W
     'NUL',
     'foo. /file',
     'PROJEC~1/file',
-    'foo\0bar',
+    'foo\0bar'
   ]) {
-    await assert.rejects(
-      fs.readFile({ path: value }),
-      { code: 'INVALID_PATH' },
-      value,
-    );
+    await assert.rejects(fs.readFile({ path: value }), { code: 'INVALID_PATH' }, value);
   }
 });
 
@@ -39,9 +35,7 @@ test('containment uses path components, not string prefixes', async (t) => {
   await writeFile(path.join(other, 'secret.txt'), 'OUTSIDE');
   assert.equal(isInside(root, other), false);
   assert.equal(isInside(root, path.join(root, 'src')), true);
-  await assert.rejects(
-    new FileService(config).readFile({ path: '../project-other/secret.txt' }),
-  );
+  await assert.rejects(new FileService(config).readFile({ path: '../project-other/secret.txt' }));
 });
 
 test('external junction/symlink is rejected by every filesystem operation', async (t) => {
@@ -52,11 +46,11 @@ test('external junction/symlink is rejected by every filesystem operation', asyn
   await symlink(
     outside,
     path.join(root, 'link'),
-    process.platform === 'win32' ? 'junction' : 'dir',
+    process.platform === 'win32' ? 'junction' : 'dir'
   );
   const fs = new FileService(config);
   await assert.rejects(fs.readFile({ path: 'link/secret.txt' }), {
-    code: 'SYMLINK_DENIED',
+    code: 'SYMLINK_DENIED'
   });
   await assert.rejects(fs.info('link'), { code: 'SYMLINK_DENIED' });
   assert.equal((await fs.tree({})).entries.length, 0);
@@ -68,10 +62,9 @@ test('hard-linked files cannot alias secrets', async (t) => {
   const outside = path.join(temp, 'secret.txt');
   await writeFile(outside, 'SECRET');
   await link(outside, path.join(root, 'innocent.txt'));
-  await assert.rejects(
-    new FileService(config).readFile({ path: 'innocent.txt' }),
-    { code: 'HARDLINK_DENIED' },
-  );
+  await assert.rejects(new FileService(config).readFile({ path: 'innocent.txt' }), {
+    code: 'HARDLINK_DENIED'
+  });
 });
 
 test('sensitive paths are denied case-insensitively, including ancestors and custom patterns', async (t) => {
@@ -96,14 +89,10 @@ test('sensitive paths are denied case-insensitively, including ancestors and cus
     '.git/config',
     '.npmrc',
     'private/data.txt',
-    'login.token',
+    'login.token'
   ]) {
     await put(file, 'SECRET');
-    await assert.rejects(
-      fs.readFile({ path: file }),
-      { code: 'SENSITIVE_PATH' },
-      file,
-    );
+    await assert.rejects(fs.readFile({ path: file }), { code: 'SENSITIVE_PATH' }, file);
     await assert.rejects(fs.info(file), { code: 'SENSITIVE_PATH' }, file);
   }
 });
@@ -114,8 +103,5 @@ test('configuration canonicalizes root, requires explicit root and protects netw
   await assert.rejects(loadConfig([], {}));
   await assert.rejects(loadConfig(['--root', root, '--host', '0.0.0.0'], {}));
   await assert.rejects(loadConfig(['--root', root, '--port', '0'], {}));
-  assert.equal(
-    (await loadConfig([], { PROJECT_ROOT: root })).host,
-    '127.0.0.1',
-  );
+  assert.equal((await loadConfig([], { PROJECT_ROOT: root })).host, '127.0.0.1');
 });

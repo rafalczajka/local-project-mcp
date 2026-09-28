@@ -6,19 +6,18 @@ import { normalizeInput, Paths } from '../src/security/paths.js';
 import { fixture } from './helpers.js';
 
 test('path normalization preserves safe names and enforces input length before normalization', () => {
-  for (const input of ['', '.', '././'])
-    assert.equal(normalizeInput(input), '.');
+  for (const input of ['', '.', '././']) assert.equal(normalizeInput(input), '.');
   assert.equal(normalizeInput('./src\\nested//file.ts/'), 'src/nested/file.ts');
   assert.equal(normalizeInput('console.txt'), 'console.txt');
   assert.equal(normalizeInput('a'.repeat(1024)), 'a'.repeat(1024));
   assert.throws(() => normalizeInput('./'.repeat(513)), {
     code: 'INVALID_PATH',
-    message: 'Use a relative project path.',
+    message: 'Use a relative project path.'
   });
   for (const input of ['a/../b', 'AUX.txt', 'file.', 'file ', 'a~b']) {
     assert.throws(() => normalizeInput(input), {
       code: 'INVALID_PATH',
-      message: 'Traversal and ambiguous platform paths are not allowed.',
+      message: 'Traversal and ambiguous platform paths are not allowed.'
     });
   }
 });
@@ -29,19 +28,19 @@ test('missing paths are optional but existing linked ancestors remain rejected',
   await assert.rejects(paths.resolve('missing/file'), { code: 'ENOENT' });
   assert.deepEqual(await paths.resolve('missing/file', true), {
     relative: 'missing/file',
-    absolute: path.join(root, 'missing/file'),
+    absolute: path.join(root, 'missing/file')
   });
   await assert.rejects(paths.resolve('missing/../file', true), {
-    code: 'INVALID_PATH',
+    code: 'INVALID_PATH'
   });
   await mkdir(path.join(root, 'target'));
   await symlink(
     path.join(root, 'target'),
     path.join(root, 'alias'),
-    process.platform === 'win32' ? 'junction' : 'dir',
+    process.platform === 'win32' ? 'junction' : 'dir'
   );
   await assert.rejects(paths.resolve('alias/missing', true), {
-    code: 'SYMLINK_DENIED',
+    code: 'SYMLINK_DENIED'
   });
 });
 
@@ -61,10 +60,6 @@ test('root replacement is rejected even when missing paths are allowed', async (
   const paths = new Paths(root);
   const original = path.join(temp, 'original');
   await rename(root, original);
-  await symlink(
-    original,
-    root,
-    process.platform === 'win32' ? 'junction' : 'dir',
-  );
+  await symlink(original, root, process.platform === 'win32' ? 'junction' : 'dir');
   await assert.rejects(paths.resolve('.', true), { code: 'ROOT_CHANGED' });
 });

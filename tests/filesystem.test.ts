@@ -15,17 +15,13 @@ test('line ranges, empty files, invalid ranges, UTF-8 clipping and oversized/bin
   const fs = new FileService(config);
   assert.equal(
     (await fs.readFile({ path: 'a.ts', startLine: 2, endLine: 2 })).text,
-    '2 | second\n',
+    '2 | second\n'
   );
   assert.equal((await fs.readFile({ path: 'empty' })).totalLines, 0);
-  assert.equal(
-    (await fs.readFile({ path: 'a.ts', startLine: 100 })).endLine,
-    null,
-  );
-  await assert.rejects(
-    fs.readFile({ path: 'a.ts', startLine: 3, endLine: 1 }),
-    { code: 'INVALID_RANGE' },
-  );
+  assert.equal((await fs.readFile({ path: 'a.ts', startLine: 100 })).endLine, null);
+  await assert.rejects(fs.readFile({ path: 'a.ts', startLine: 3, endLine: 1 }), {
+    code: 'INVALID_RANGE'
+  });
   for (const file of ['binary', 'invalid-utf8'])
     await assert.rejects(fs.readFile({ path: file }), { code: 'BINARY_FILE' });
   const clipped = await fs.readFile({ path: 'unicode' }, 15);
@@ -34,7 +30,7 @@ test('line ranges, empty files, invalid ranges, UTF-8 clipping and oversized/bin
   assert.ok(!clipped.text.includes('�'));
   config.limits.fileBytes = 16;
   await assert.rejects(fs.readFile({ path: 'unicode' }), {
-    code: 'FILE_TOO_LARGE',
+    code: 'FILE_TOO_LARGE'
   });
   assert.equal((await fs.info('unicode')).binary, null);
   assert.equal((await fs.info('binary')).binary, true);
@@ -49,12 +45,12 @@ test('batch reads have independent errors and combined byte limits', async (t) =
     { path: '.env' },
     { path: 'missing' },
     { path: 'one' },
-    { path: 'two' },
+    { path: 'two' }
   ]);
   assert.equal(result.files.length, 4);
-  assert.equal(result.files[0]!.ok, false);
-  assert.equal(result.files[2]!.ok, true);
-  assert.equal(result.files[3]!.ok, false);
+  assert.equal(result.files[0]?.ok, false);
+  assert.equal(result.files[2]?.ok, true);
+  assert.equal(result.files[3]?.ok, false);
   assert.equal(result.truncated, true);
 });
 
@@ -67,7 +63,7 @@ test('nested gitignore, negation, generated paths, hidden files, and configurabl
     'src/drop.log',
     'node_modules/x.ts',
     '.hidden',
-    'excluded/a.ts',
+    'excluded/a.ts'
   ])
     await put(file, 'needle');
   await put('.gitignore', '*.log\nexcluded/\n');
@@ -79,10 +75,10 @@ test('nested gitignore, negation, generated paths, hidden files, and configurabl
   assert.ok(!found.includes('src/drop.log'));
   assert.ok(!found.includes('node_modules/x.ts'));
   await assert.rejects(fs.readFile({ path: 'drop.log' }), {
-    code: 'IGNORED_PATH',
+    code: 'IGNORED_PATH'
   });
   await assert.rejects(fs.tree({ path: 'node_modules' }), {
-    code: 'IGNORED_PATH',
+    code: 'IGNORED_PATH'
   });
   const tree = await fs.tree({});
   assert.ok(!tree.entries.some((e) => e.path === '.hidden'));
@@ -95,41 +91,31 @@ test('nested gitignore, negation, generated paths, hidden files, and configurabl
 
 test('search literal, regex, case, glob, limits, sensitive and binary omissions', async (t) => {
   const { config, put } = await fixture(t);
-  await put(
-    'src/auth.ts',
-    'UserSession created\nuserSession used\nuserSession closed\n',
-  );
+  await put('src/auth.ts', 'UserSession created\nuserSession used\nuserSession closed\n');
   await put('src/auth.js', 'UserSession js\n');
   await put('.env', 'UserSession SECRET');
   await put('node_modules/a.ts', 'UserSession ignored');
   await put('binary', Buffer.from([0, 1, 2]));
   const search = (args: Parameters<typeof searchText>[1]) =>
     searchText(new FileService(config), args);
-  assert.equal(
-    (await search({ query: 'UserSession', glob: '**/*.ts' })).matches.length,
-    3,
-  );
-  assert.equal(
-    (await search({ query: 'UserSession', caseSensitive: true })).matches
-      .length,
-    2,
-  );
+  assert.equal((await search({ query: 'UserSession', glob: '**/*.ts' })).matches.length, 3);
+  assert.equal((await search({ query: 'UserSession', caseSensitive: true })).matches.length, 2);
   assert.equal(
     (
       await search({
         query: '^userSession.*used$',
         regex: true,
-        caseSensitive: true,
+        caseSensitive: true
       })
-    ).matches[0]!.line,
-    2,
+    ).matches[0]?.line,
+    2
   );
   const limited = await search({ query: 'UserSession', maxResults: 1 });
   assert.equal(limited.matches.length, 1);
   assert.equal(limited.truncated, true);
   assert.equal((await search({ query: 'SECRET' })).matches.length, 0);
   await assert.rejects(search({ query: '(?=x)', regex: true }), {
-    code: 'INVALID_REGEX',
+    code: 'INVALID_REGEX'
   });
 });
 
@@ -138,20 +124,13 @@ test('tree entry/depth, file discovery and scan byte limits report truncation', 
   for (const file of ['src/deep/a', 'a', 'b', 'c']) await put(file, 'needle');
   config.limits.treeEntries = 2;
   assert.equal((await new FileService(config).tree({})).truncated, true);
+  assert.equal((await new FileService(config).tree({ depth: 1 })).truncated, true);
   assert.equal(
-    (await new FileService(config).tree({ depth: 1 })).truncated,
-    true,
-  );
-  assert.equal(
-    (await new FileService(config).find({ pattern: '**/*', maxResults: 1 }))
-      .truncated,
-    true,
+    (await new FileService(config).find({ pattern: '**/*', maxResults: 1 })).truncated,
+    true
   );
   config.limits.scanBytes = 1;
-  assert.equal(
-    (await searchText(new FileService(config), { query: 'needle' })).truncated,
-    true,
-  );
+  assert.equal((await searchText(new FileService(config), { query: 'needle' })).truncated, true);
 });
 
 test('cancellation stops work', async (t) => {
@@ -161,9 +140,9 @@ test('cancellation stops work', async (t) => {
   abort.abort();
   await assert.rejects(
     new FileService(config, new Budget(1000, abort.signal)).readFile({
-      path: 'a',
+      path: 'a'
     }),
-    { code: 'TIMEOUT' },
+    { code: 'TIMEOUT' }
   );
 });
 
@@ -183,10 +162,7 @@ test('numbered reads preserve byte boundaries and blank final lines', async (t) 
   assert.equal(empty.text, '');
   assert.equal(empty.endLine, null);
   assert.equal(empty.truncated, true);
-  assert.equal(
-    (await fs.readFile({ path: 'lines', startLine: 2 })).text,
-    '2 | \n',
-  );
+  assert.equal((await fs.readFile({ path: 'lines', startLine: 2 })).text, '2 | \n');
 });
 
 test('walk preserves skip, stop and single-file visitor semantics', async (t) => {
@@ -194,34 +170,20 @@ test('walk preserves skip, stop and single-file visitor semantics', async (t) =>
   await put('directory/child', 'text');
   const options = { depth: 4, includeHidden: true };
   const skipped: string[] = [];
-  const summary = await new FileService(config).walk(
-    '.',
-    options,
-    async (entry) => {
-      skipped.push(entry.path);
-      return 'skip';
-    },
-  );
+  const summary = await new FileService(config).walk('.', options, async (entry) => {
+    skipped.push(entry.path);
+    return 'skip';
+  });
   assert.deepEqual(skipped, ['directory']);
   assert.deepEqual(summary, { truncated: false, omitted: 0 });
-  const stopped = await new FileService(config).walk(
-    '.',
-    options,
-    async () => false,
-  );
+  const stopped = await new FileService(config).walk('.', options, async () => false);
   assert.deepEqual(stopped, { truncated: true, omitted: 0 });
   const entries: Entry[] = [];
-  const single = await new FileService(config).walk(
-    'directory/child',
-    options,
-    async (entry) => {
-      entries.push(entry);
-      return false;
-    },
-  );
-  assert.deepEqual(entries, [
-    { path: 'directory/child', type: 'file', depth: 0 },
-  ]);
+  const single = await new FileService(config).walk('directory/child', options, async (entry) => {
+    entries.push(entry);
+    return false;
+  });
+  assert.deepEqual(entries, [{ path: 'directory/child', type: 'file', depth: 0 }]);
   assert.deepEqual(single, { truncated: false, omitted: 0 });
 });
 
@@ -234,15 +196,11 @@ test('walk reports excluded entries and respects the shared scan budget', async 
   assert.equal(hidden.omitted, 2);
   assert.deepEqual(
     hidden.entries.map((entry) => entry.path),
-    ['visible'],
+    ['visible']
   );
   config.limits.scanEntries = 1;
   const fs = new FileService(config);
-  const summary = await fs.walk(
-    '.',
-    { depth: 4, includeHidden: true },
-    async () => true,
-  );
+  const summary = await fs.walk('.', { depth: 4, includeHidden: true }, async () => true);
   assert.equal(summary.truncated, true);
   assert.equal(fs.budget.visited, 2);
 });

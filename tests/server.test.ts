@@ -9,12 +9,7 @@ import { fixture } from './helpers.js';
 function runServer(args: string[]) {
   return spawnSync(
     process.execPath,
-    [
-      '--import',
-      'tsx',
-      fileURLToPath(new URL('../src/server.ts', import.meta.url)),
-      ...args,
-    ],
+    ['--import', 'tsx', fileURLToPath(new URL('../src/server.ts', import.meta.url)), ...args],
     {
       encoding: 'utf8',
       timeout: 15_000,
@@ -23,9 +18,9 @@ function runServer(args: string[]) {
         PROJECT_ROOT: '',
         HOST: '127.0.0.1',
         PORT: '3000',
-        MCP_BEARER_TOKEN: '',
-      },
-    },
+        MCP_BEARER_TOKEN: ''
+      }
+    }
   );
 }
 
@@ -36,7 +31,7 @@ test('startup errors exit with a sanitized message on stderr', () => {
   assert.equal(result.stdout, '');
   assert.equal(
     result.stderr.trim(),
-    'Startup failed. Check --root / PROJECT_ROOT, --config, HOST, PORT and MCP_BEARER_TOKEN.',
+    'Startup failed. Check --root / PROJECT_ROOT, --config, HOST, PORT and MCP_BEARER_TOKEN.'
   );
 });
 
@@ -47,7 +42,7 @@ test('an occupied port reports a sanitized listener error and exits', async (t) 
     () =>
       new Promise<void>((resolve, reject) => {
         listener.close((error) => (error ? reject(error) : resolve()));
-      }),
+      })
   );
   listener.listen(0, '127.0.0.1');
   await once(listener, 'listening');
@@ -57,8 +52,5 @@ test('an occupied port reports a sanitized listener error and exits', async (t) 
   assert.equal(result.error, undefined);
   assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
-  assert.equal(
-    result.stderr.trim(),
-    'Unable to start listener. Check HOST, PORT and permissions.',
-  );
+  assert.equal(result.stderr.trim(), 'Unable to start listener. Check HOST, PORT and permissions.');
 });
