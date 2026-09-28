@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Bounded, read-only MCP access to one local software project",
+  "description": "Read-only MCP server for secure access to local project files",
   "engines": {
     "node": ">=24 <25"
   },
