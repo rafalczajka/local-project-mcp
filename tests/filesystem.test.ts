@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FileService } from '../src/services/filesystem.js';
+import { FileService, type Entry } from '../src/services/filesystem.js';
 import { searchText } from '../src/services/search.js';
 import { Budget } from '../src/errors.js';
 import { fixture } from './helpers.js';
@@ -165,4 +165,84 @@ test('cancellation stops work', async (t) => {
     }),
     { code: 'TIMEOUT' },
   );
+});
+
+test('numbered reads preserve byte boundaries and blank final lines', async (t) => {
+  const { config, put } = await fixture(t);
+  await put('lines', 'a\n\n');
+  const fs = new FileService(config);
+  const exact = await fs.readFile({ path: 'lines', endLine: 1 }, 6);
+  assert.equal(exact.text, '1 | a\n');
+  assert.equal(exact.truncated, false);
+  const bounded = await fs.readFile({ path: 'lines' }, 6);
+  assert.equal(bounded.text, exact.text);
+  assert.equal(bounded.endLine, 1);
+  assert.equal(bounded.totalLines, 2);
+  assert.equal(bounded.truncated, true);
+  const empty = await fs.readFile({ path: 'lines' }, 0);
+  assert.equal(empty.text, '');
+  assert.equal(empty.endLine, null);
+  assert.equal(empty.truncated, true);
+  assert.equal(
+    (await fs.readFile({ path: 'lines', startLine: 2 })).text,
+    '2 | \n',
+  );
+});
+
+test('walk preserves skip, stop and single-file visitor semantics', async (t) => {
+  const { config, put } = await fixture(t);
+  await put('directory/child', 'text');
+  const options = { depth: 4, includeHidden: true };
+  const skipped: string[] = [];
+  const summary = await new FileService(config).walk(
+    '.',
+    options,
+    async (entry) => {
+      skipped.push(entry.path);
+      return 'skip';
+    },
+  );
+  assert.deepEqual(skipped, ['directory']);
+  assert.deepEqual(summary, { truncated: false, omitted: 0 });
+  const stopped = await new FileService(config).walk(
+    '.',
+    options,
+    async () => false,
+  );
+  assert.deepEqual(stopped, { truncated: true, omitted: 0 });
+  const entries: Entry[] = [];
+  const single = await new FileService(config).walk(
+    'directory/child',
+    options,
+    async (entry) => {
+      entries.push(entry);
+      return false;
+    },
+  );
+  assert.deepEqual(entries, [
+    { path: 'directory/child', type: 'file', depth: 0 },
+  ]);
+  assert.deepEqual(single, { truncated: false, omitted: 0 });
+});
+
+test('walk reports excluded entries and respects the shared scan budget', async (t) => {
+  const { config, put } = await fixture(t);
+  await put('.hidden', 'text');
+  await put('.env', 'SECRET');
+  await put('visible', 'text');
+  const hidden = await new FileService(config).tree({});
+  assert.equal(hidden.omitted, 2);
+  assert.deepEqual(
+    hidden.entries.map((entry) => entry.path),
+    ['visible'],
+  );
+  config.limits.scanEntries = 1;
+  const fs = new FileService(config);
+  const summary = await fs.walk(
+    '.',
+    { depth: 4, includeHidden: true },
+    async () => true,
+  );
+  assert.equal(summary.truncated, true);
+  assert.equal(fs.budget.visited, 2);
 });
