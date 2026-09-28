@@ -4,6 +4,12 @@ import type { Config } from '../config.js';
 import { ProjectError } from '../errors.js';
 import { Paths, normalizeInput } from './paths.js';
 
+const MAX_GITIGNORE_BYTES = 64 * 1024;
+
+function matchesSensitivePattern(value: string, pattern: string): boolean {
+  return minimatch(value, pattern, { nocase: true, dot: true, nonegate: true });
+}
+
 export const sensitivePatterns = [
   '.env',
   '.env.*',
@@ -38,25 +44,19 @@ export class Policy {
   ) {
     this.exclusions = ignore().add(config.ignore);
   }
-  private sensitive(relative: string) {
+  private sensitive(relative: string): boolean {
     const patterns = [...sensitivePatterns, ...this.config.sensitive];
-    return relative.split('/').some((component, i, parts) =>
-      patterns.some(
+    return relative.split('/').some((component, index, parts) => {
+      const ancestor = parts.slice(0, index + 1).join('/');
+      return patterns.some(
         (pattern) =>
-          minimatch(component, pattern, {
-            nocase: true,
-            dot: true,
-            nonegate: true,
-          }) ||
-          minimatch(parts.slice(0, i + 1).join('/'), pattern, {
-            nocase: true,
-            dot: true,
-            nonegate: true,
-          }),
-      ),
-    );
+          matchesSensitivePattern(component, pattern) ||
+          matchesSensitivePattern(ancestor, pattern),
+      );
+    });
   }
-  private async gitignore(directory: string) {
+
+  private async gitignore(directory: string): Promise<Ignore> {
     const cached = this.gitignores.get(directory);
     if (cached) return cached;
     const matcher = ignore();
@@ -65,7 +65,7 @@ export class Policy {
         (
           await this.paths.read(
             directory === '.' ? '.gitignore' : `${directory}/.gitignore`,
-            64 * 1024,
+            MAX_GITIGNORE_BYTES,
           )
         ).toString('utf8'),
       );
@@ -75,7 +75,7 @@ export class Policy {
     this.gitignores.set(directory, matcher);
     return matcher;
   }
-  async assert(input: string, directory = false) {
+  async assert(input: string, directory = false): Promise<void> {
     const relative = normalizeInput(input);
     if (relative === '.') return;
     if (this.sensitive(relative))
@@ -89,30 +89,45 @@ export class Policy {
         'IGNORED_PATH',
         'Path is excluded by project policy.',
       );
-    if (this.config.respectGitignore) {
-      const parts = relative.split('/');
-      // Evaluate each parent directory as a directory: negations cannot resurrect an excluded parent.
-      for (let end = 1; end <= parts.length; end++) {
-        let ignored = false;
-        for (let base = 0; base < end; base++) {
-          const rule = await this.gitignore(
-            parts.slice(0, base).join('/') || '.',
-          );
-          const candidate =
-            parts.slice(base, end).join('/') +
-            (end < parts.length || directory ? '/' : '');
-          const result = rule.test(candidate);
-          if (result.ignored) ignored = true;
-          else if (result.unignored) ignored = false;
-        }
-        if (ignored)
-          throw new ProjectError(
-            'IGNORED_PATH',
-            'Path is excluded by .gitignore.',
-          );
-      }
+    if (this.config.respectGitignore)
+      await this.assertGitignoreAllows(relative, directory);
+  }
+
+  private async assertGitignoreAllows(
+    relative: string,
+    directory: boolean,
+  ): Promise<void> {
+    const parts = relative.split('/');
+    // Check parents first: negations cannot resurrect an excluded directory.
+    for (let end = 1; end <= parts.length; end++) {
+      if (
+        await this.isGitignored(
+          parts.slice(0, end),
+          end < parts.length || directory,
+        )
+      )
+        throw new ProjectError(
+          'IGNORED_PATH',
+          'Path is excluded by .gitignore.',
+        );
     }
   }
+
+  private async isGitignored(
+    parts: string[],
+    directory: boolean,
+  ): Promise<boolean> {
+    let ignored = false;
+    for (let base = 0; base < parts.length; base++) {
+      const rule = await this.gitignore(parts.slice(0, base).join('/') || '.');
+      const candidate = parts.slice(base).join('/') + (directory ? '/' : '');
+      const result = rule.test(candidate);
+      if (result.ignored) ignored = true;
+      else if (result.unignored) ignored = false;
+    }
+    return ignored;
+  }
+
   async resolve(input: string, allowMissing = false) {
     // Policy is evaluated before stat to avoid probing sensitive names.
     await this.assert(input);
