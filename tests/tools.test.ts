@@ -38,12 +38,15 @@ test('tool responses keep text and structured results identical for success and 
       { type: 'text', text: JSON.stringify(result.structuredContent) },
     ]);
     if (code)
-      assert.deepEqual(result.structuredContent?.error, {
-        code,
-        message:
-          code === 'NOT_FOUND'
-            ? 'The project path does not exist.'
-            : 'Sensitive paths are not exposed.',
+      assert.deepEqual(result.structuredContent, {
+        ok: false,
+        error: {
+          code,
+          message:
+            code === 'NOT_FOUND'
+              ? 'The project path does not exist.'
+              : 'Sensitive paths are not exposed.',
+        },
       });
   }
   const batch = await client.callTool({

@@ -40,6 +40,57 @@ const outputSchema = z.object({
   error: errorSchema.optional(),
 });
 
+const RESPONSE_OVERHEAD_BYTES = 128;
+
+type ToolResult = z.infer<typeof outputSchema>;
+type ToolAction<T extends z.ZodRawShape> = (
+  fs: FileService,
+  args: z.output<z.ZodObject<T>>,
+) => Promise<object>;
+
+function formatToolResponse(result: ToolResult) {
+  return {
+    isError: !result.ok,
+    structuredContent: result,
+    content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+  };
+}
+
+function assertOutputLimit(result: ToolResult, maxBytes: number): void {
+  // Covers JSON escaping, metadata, filenames and both representations on the wire.
+  const response = formatToolResponse(result);
+  if (
+    Buffer.byteLength(JSON.stringify(response)) + RESPONSE_OVERHEAD_BYTES >
+    maxBytes
+  )
+    throw new ProjectError(
+      'OUTPUT_LIMIT',
+      'Serialized result exceeds the output limit; narrow the request.',
+    );
+}
+
+async function executeTool<T extends z.ZodRawShape>(
+  config: Config,
+  action: ToolAction<T>,
+  args: z.output<z.ZodObject<T>>,
+  signal?: AbortSignal,
+) {
+  let result: ToolResult;
+  try {
+    const fs = new FileService(
+      config,
+      new Budget(config.limits.timeoutMs, signal),
+    );
+    const data = await action(fs, args);
+    fs.budget.check();
+    result = { ok: true, data: data as Record<string, unknown> };
+    assertOutputLimit(result, config.limits.outputBytes);
+  } catch (error) {
+    result = { ok: false, error: safeError(error) };
+  }
+  return formatToolResponse(result);
+}
+
 export function createMcpServer(config: Config, signal?: AbortSignal) {
   const server = new McpServer(
     { name: 'local-project-mcp', version: '1.0.0' },
@@ -52,10 +103,7 @@ export function createMcpServer(config: Config, signal?: AbortSignal) {
     name: string,
     description: string,
     schema: z.ZodObject<T>,
-    action: (
-      fs: FileService,
-      args: z.output<z.ZodObject<T>>,
-    ) => Promise<object>,
+    action: ToolAction<T>,
   ) {
     const toolOutputSchema = outputSchema.extend({
       data: resultSchemas[name]!.optional(),
@@ -74,39 +122,8 @@ export function createMcpServer(config: Config, signal?: AbortSignal) {
           idempotentHint: true,
         },
       },
-      async (args) => {
-        let result: z.infer<typeof outputSchema>;
-        try {
-          const fs = new FileService(
-            config,
-            new Budget(config.limits.timeoutMs, signal),
-          );
-          const data = await action(fs, args as z.output<z.ZodObject<T>>);
-          fs.budget.check();
-          result = { ok: true, data: data as Record<string, unknown> };
-          // Covers JSON escaping, metadata, filenames and both representations on the wire.
-          const response = {
-            isError: false,
-            structuredContent: result,
-            content: [{ type: 'text', text: JSON.stringify(result) }],
-          };
-          if (
-            Buffer.byteLength(JSON.stringify(response)) + 128 >
-            config.limits.outputBytes
-          )
-            throw new ProjectError(
-              'OUTPUT_LIMIT',
-              'Serialized result exceeds the output limit; narrow the request.',
-            );
-        } catch (error) {
-          result = { ok: false, error: safeError(error) };
-        }
-        return {
-          isError: !result.ok,
-          structuredContent: result,
-          content: [{ type: 'text' as const, text: JSON.stringify(result) }],
-        };
-      },
+      (args) =>
+        executeTool(config, action, args as z.output<z.ZodObject<T>>, signal),
     );
   }
   register(
