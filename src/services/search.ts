@@ -3,21 +3,31 @@ import { minimatch } from 'minimatch';
 import { clip, ProjectError, safeError } from '../errors.js';
 import type { FileService } from './filesystem.js';
 
-export async function searchText(
-  fs: FileService,
-  input: {
-    query: string;
-    path?: string;
-    glob?: string;
-    regex?: boolean;
-    caseSensitive?: boolean;
-    maxResults?: number;
-  },
-) {
-  let regex: RE2 | undefined;
+const SEARCH_DEPTH = 64;
+const EXCERPT_LEADING_CHARACTERS = 100;
+const MAX_EXCERPT_BYTES = 500;
+
+interface SearchInput {
+  query: string;
+  path?: string;
+  glob?: string;
+  regex?: boolean;
+  caseSensitive?: boolean;
+  maxResults?: number;
+}
+
+interface SearchMatch {
+  path: string;
+  line: number;
+  excerpt: string;
+  excerptTruncated: boolean;
+}
+
+function createLineMatcher(input: SearchInput): (line: string) => number {
   if (input.regex) {
     try {
-      regex = new RE2(input.query, input.caseSensitive ? 'u' : 'iu');
+      const regex = new RE2(input.query, input.caseSensitive ? 'u' : 'iu');
+      return (line) => regex.exec(line)?.index ?? -1;
     } catch {
       throw new ProjectError(
         'INVALID_REGEX',
@@ -26,17 +36,36 @@ export async function searchText(
     }
   }
   const query = input.caseSensitive ? input.query : input.query.toLowerCase();
-  const matches: {
-    path: string;
-    line: number;
-    excerpt: string;
-    excerptTruncated: boolean;
-  }[] = [];
+  return (line) =>
+    (input.caseSensitive ? line : line.toLowerCase()).indexOf(query);
+}
+
+function createMatch(
+  path: string,
+  lineNumber: number,
+  line: string,
+  index: number,
+): SearchMatch {
+  const excerpt = clip(
+    line.slice(Math.max(0, index - EXCERPT_LEADING_CHARACTERS)),
+    MAX_EXCERPT_BYTES,
+  );
+  return {
+    path,
+    line: lineNumber,
+    excerpt,
+    excerptTruncated: excerpt !== line,
+  };
+}
+
+export async function searchText(fs: FileService, input: SearchInput) {
+  const findIndex = createLineMatcher(input);
+  const matches: SearchMatch[] = [];
   const skipped: Record<string, number> = {};
   let limitReached = false;
   const summary = await fs.walk(
     input.path ?? '.',
-    { depth: 64, includeHidden: true },
+    { depth: SEARCH_DEPTH, includeHidden: true },
     async (entry) => {
       if (
         entry.type !== 'file' ||
@@ -62,26 +91,15 @@ export async function searchText(
       for (let i = 0; i < lines.length; i++) {
         fs.budget.check();
         const line = lines[i]!;
-        const comparable = input.caseSensitive ? line : line.toLowerCase();
-        const index = regex
-          ? (regex.exec(line)?.index ?? -1)
-          : comparable.indexOf(query);
-        if (index >= 0) {
-          if (
-            matches.length >=
-            (input.maxResults ?? fs.config.limits.searchResults)
-          ) {
-            limitReached = true;
-            return false;
-          }
-          const excerpt = clip(line.slice(Math.max(0, index - 100)), 500);
-          matches.push({
-            path: entry.path,
-            line: i + 1,
-            excerpt,
-            excerptTruncated: excerpt !== line,
-          });
+        const index = findIndex(line);
+        if (index < 0) continue;
+        if (
+          matches.length >= (input.maxResults ?? fs.config.limits.searchResults)
+        ) {
+          limitReached = true;
+          return false;
         }
+        matches.push(createMatch(entry.path, i + 1, line, index));
       }
       return true;
     },
