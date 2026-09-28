@@ -12,7 +12,7 @@ test('search only reports result truncation when another matching line exists', 
     searchText(new FileService(config), {
       query: 'needle',
       path: 'source',
-      maxResults: 1,
+      maxResults: 1
     });
   const exact = await search();
   assert.equal(exact.matches.length, 1);
@@ -28,7 +28,7 @@ test('search excerpts retain leading context and clip UTF-8 without replacement 
   await put('source', 'x'.repeat(150) + 'needle' + '😀'.repeat(200));
   const result = await searchText(new FileService(config), {
     query: 'needle',
-    path: 'source',
+    path: 'source'
   });
   const match = result.matches[0];
   assert.ok(match);
@@ -49,7 +49,7 @@ test('search counts skipped files and applies globs before reading', async (t) =
   assert.deepEqual(all.skipped, { BINARY_FILE: 1, FILE_TOO_LARGE: 1 });
   const filtered = await searchText(new FileService(config), {
     query: 'needle',
-    glob: '**/*.ts',
+    glob: '**/*.ts'
   });
   assert.deepEqual(filtered.skipped, {});
   assert.deepEqual(filtered.matches, all.matches);
@@ -61,29 +61,29 @@ test('regex search preserves blank lines and propagates cancellation', async (t)
   const blank = await searchText(new FileService(config), {
     query: '^$',
     regex: true,
-    path: 'source',
+    path: 'source'
   });
   assert.deepEqual(
     blank.matches.map((match) => match.line),
-    [2, 4],
+    [2, 4]
   );
   const sensitive = await searchText(new FileService(config), {
     query: '^needle$',
     regex: true,
     caseSensitive: true,
-    path: 'source',
+    path: 'source'
   });
   assert.deepEqual(
     sensitive.matches.map((match) => match.line),
-    [3],
+    [3]
   );
   const controller = new AbortController();
   controller.abort();
   await assert.rejects(
     searchText(new FileService(config, new Budget(1000, controller.signal)), {
       query: 'needle',
-      path: 'source',
+      path: 'source'
     }),
-    { code: 'TIMEOUT' },
+    { code: 'TIMEOUT' }
   );
 });

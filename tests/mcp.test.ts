@@ -44,8 +44,8 @@ test('MCP HTTP initialization, nine read-only tools, schemas and representative 
       'file_info',
       'git_status',
       'git_diff',
-      'git_log',
-    ].sort(),
+      'git_log'
+    ].sort()
   );
   for (const tool of tools) {
     assert.equal(tool.annotations?.readOnlyHint, true);
@@ -62,7 +62,7 @@ test('MCP HTTP initialization, nine read-only tools, schemas and representative 
     ['file_info', { path: 'src/auth.ts' }],
     ['git_status', {}],
     ['git_diff', {}],
-    ['git_log', { limit: 1 }],
+    ['git_log', { limit: 1 }]
   ] as const;
   for (const [name, args] of cases) {
     const result = await client.callTool({ name, arguments: args });
@@ -75,41 +75,34 @@ test('MCP HTTP initialization, nine read-only tools, schemas and representative 
     { path: '../secret' },
     { path: '.env' },
     { path: 'src/auth.ts', startLine: -1 },
-    { path: 'src/auth.ts', shell: 'whoami' },
+    { path: 'src/auth.ts', shell: 'whoami' }
   ]) {
     const result = await client.callTool({
       name: 'read_file',
-      arguments: args,
+      arguments: args
     });
     assert.equal(result.isError, true);
     assert.ok(!JSON.stringify(result).includes(config.root));
   }
   assert.equal(
-    (await client.callTool({ name: 'shell', arguments: { command: 'whoami' } }))
-      .isError,
-    true,
+    (await client.callTool({ name: 'shell', arguments: { command: 'whoami' } })).isError,
+    true
   );
 });
 
 test('HTTP rejects malicious Host/Origin, invalid bodies and methods', async (t) => {
   const { config } = await fixture(t);
   const url = await listen(t, config);
-  const hostStatus = await new Promise<number | undefined>(
-    (resolve, reject) => {
-      request(url, { headers: { Host: 'attacker.example' } }, (response) => {
-        response.resume();
-        resolve(response.statusCode);
-      })
-        .on('error', reject)
-        .end();
-    },
-  );
+  const hostStatus = await new Promise<number | undefined>((resolve, reject) => {
+    request(url, { headers: { Host: 'attacker.example' } }, (response) => {
+      response.resume();
+      resolve(response.statusCode);
+    })
+      .on('error', reject)
+      .end();
+  });
   assert.equal(hostStatus, 403);
-  assert.equal(
-    (await fetch(url, { headers: { Origin: 'https://attacker.example' } }))
-      .status,
-    403,
-  );
+  assert.equal((await fetch(url, { headers: { Origin: 'https://attacker.example' } })).status, 403);
   assert.equal((await fetch(url)).status, 405);
   assert.equal((await fetch(url, { method: 'DELETE' })).status, 405);
   assert.equal((await fetch(url, { method: 'POST', body: '{}' })).status, 415);
@@ -118,30 +111,30 @@ test('HTTP rejects malicious Host/Origin, invalid bodies and methods', async (t)
       await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: '{',
+        body: '{'
       })
     ).status,
-    400,
+    400
   );
   assert.equal(
     (
       await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: '[]',
+        body: '[]'
       })
     ).status,
-    400,
+    400
   );
   assert.equal(
     (
       await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: 'a'.repeat(40000) }),
+        body: JSON.stringify({ data: 'a'.repeat(40000) })
       })
     ).status,
-    413,
+    413
   );
 });
 
@@ -151,25 +144,19 @@ test('optional bearer auth enforced on every request and explicit browser origin
   config.allowedOrigins = ['http://localhost:6274'];
   const url = await listen(t, config);
   assert.equal((await fetch(url)).status, 401);
-  assert.equal(
-    (await fetch(url, { headers: { Authorization: 'Bearer wrong' } })).status,
-    401,
-  );
+  assert.equal((await fetch(url, { headers: { Authorization: 'Bearer wrong' } })).status, 401);
   const preflight = await fetch(url, {
     method: 'OPTIONS',
-    headers: { Origin: 'http://localhost:6274' },
+    headers: { Origin: 'http://localhost:6274' }
   });
   assert.equal(preflight.status, 204);
-  assert.equal(
-    preflight.headers.get('Access-Control-Allow-Origin'),
-    'http://localhost:6274',
-  );
+  assert.equal(preflight.headers.get('Access-Control-Allow-Origin'), 'http://localhost:6274');
   const client = new Client({ name: 'auth-test', version: '1' });
   t.after(() => client.close());
   await client.connect(
     new StreamableHTTPClientTransport(new URL(url), {
-      requestInit: { headers: { Authorization: `Bearer ${config.token}` } },
-    }),
+      requestInit: { headers: { Authorization: `Bearer ${config.token}` } }
+    })
   );
   assert.equal((await client.listTools()).tools.length, 9);
 });
@@ -181,21 +168,18 @@ test('serialized output cap returns a structured error, not an unbounded respons
   await put('large', '"'.repeat(1500));
   const client = new Client({ name: 'limit-test', version: '1' });
   t.after(() => client.close());
-  await client.connect(
-    new StreamableHTTPClientTransport(new URL(await listen(t, config))),
-  );
+  await client.connect(new StreamableHTTPClientTransport(new URL(await listen(t, config))));
   const result = await client.callTool({
     name: 'read_file',
-    arguments: { path: 'large' },
+    arguments: { path: 'large' }
   });
   assert.equal(result.isError, true);
   assert.deepEqual(result.structuredContent, {
     ok: false,
     error: {
       code: 'OUTPUT_LIMIT',
-      message:
-        'Serialized result exceeds the output limit; narrow the request.',
-    },
+      message: 'Serialized result exceeds the output limit; narrow the request.'
+    }
   });
 });
 
@@ -216,73 +200,63 @@ test('HTTP guards preserve rejection order and headers before MCP handling', asy
       method: 'GET',
       headers: { Origin: 'https://attacker.example' },
       status: 403,
-      error: 'Origin is not allowed',
+      error: 'Origin is not allowed'
     },
     {
       suffix: '/missing',
       method: 'GET',
       headers: {},
       status: 404,
-      error: 'Not found',
+      error: 'Not found'
     },
     {
       suffix: '',
       method: 'GET',
       headers: {},
       status: 401,
-      error: 'Bearer authentication required',
+      error: 'Bearer authentication required'
     },
     {
       suffix: '',
       method: 'GET',
       headers: { Authorization: `Bearer ${config.token}` },
       status: 405,
-      error: 'This stateless endpoint accepts POST',
+      error: 'This stateless endpoint accepts POST'
     },
     {
       suffix: '',
       method: 'POST',
       headers: {
         Authorization: `Bearer ${config.token}`,
-        Origin: 'http://localhost:6274',
+        Origin: 'http://localhost:6274'
       },
       status: 415,
-      error: 'Content-Type must be application/json',
-    },
+      error: 'Content-Type must be application/json'
+    }
   ];
   for (const entry of cases) {
     const response = await fetch(url + entry.suffix, {
       method: entry.method,
-      headers: entry.headers,
+      headers: entry.headers
     });
     assert.equal(response.status, entry.status);
     assert.deepEqual(await response.json(), { error: entry.error });
     assert.equal(response.headers.get('Cache-Control'), 'no-store');
     assert.equal(response.headers.get('X-Content-Type-Options'), 'nosniff');
-    if (entry.status === 405)
-      assert.equal(response.headers.get('Allow'), 'POST, OPTIONS');
+    if (entry.status === 405) assert.equal(response.headers.get('Allow'), 'POST, OPTIONS');
     if (entry.status === 415)
-      assert.equal(
-        response.headers.get('Access-Control-Allow-Origin'),
-        'http://localhost:6274',
-      );
+      assert.equal(response.headers.get('Access-Control-Allow-Origin'), 'http://localhost:6274');
   }
   const preflight = await fetch(url, {
     method: 'OPTIONS',
-    headers: { Origin: 'http://localhost:6274' },
+    headers: { Origin: 'http://localhost:6274' }
   });
   assert.equal(preflight.status, 204);
-  assert.equal(
-    preflight.headers.get('Access-Control-Allow-Methods'),
-    'POST, OPTIONS',
-  );
+  assert.equal(preflight.headers.get('Access-Control-Allow-Methods'), 'POST, OPTIONS');
   assert.equal(
     preflight.headers.get('Access-Control-Allow-Headers'),
-    'Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id',
+    'Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id'
   );
-  assert.equal(
-    preflight.headers.get('Access-Control-Expose-Headers'),
-    'MCP-Session-Id',
-  );
+  assert.equal(preflight.headers.get('Access-Control-Expose-Headers'), 'MCP-Session-Id');
   assert.equal(preflight.headers.get('Vary'), 'Origin');
 });

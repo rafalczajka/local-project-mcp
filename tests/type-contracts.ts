@@ -4,7 +4,7 @@ import type { FileService } from '../src/services/filesystem.js';
 // Checked by tsc, never executed: these errors must remain compile-time errors.
 export function checkResultContracts(
   item: ToolData<'read_files'>['files'][number],
-  fs: FileService,
+  fs: FileService
 ): void {
   if (item.ok) {
     item.text satisfies string;
