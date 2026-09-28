@@ -191,3 +191,91 @@ test('serialized output cap returns a structured error, not an unbounded respons
     'OUTPUT_LIMIT',
   );
 });
+
+test('HTTP guards preserve rejection order and headers before MCP handling', async (t) => {
+  const { config } = await fixture(t);
+  config.token = 'test-only-token-'.repeat(4);
+  config.allowedOrigins = ['http://localhost:6274'];
+  const url = await listen(t, config);
+  const cases: {
+    suffix: string;
+    method: string;
+    headers: Record<string, string>;
+    status: number;
+    error: string;
+  }[] = [
+    {
+      suffix: '/missing',
+      method: 'GET',
+      headers: { Origin: 'https://attacker.example' },
+      status: 403,
+      error: 'Origin is not allowed',
+    },
+    {
+      suffix: '/missing',
+      method: 'GET',
+      headers: {},
+      status: 404,
+      error: 'Not found',
+    },
+    {
+      suffix: '',
+      method: 'GET',
+      headers: {},
+      status: 401,
+      error: 'Bearer authentication required',
+    },
+    {
+      suffix: '',
+      method: 'GET',
+      headers: { Authorization: `Bearer ${config.token}` },
+      status: 405,
+      error: 'This stateless endpoint accepts POST',
+    },
+    {
+      suffix: '',
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.token}`,
+        Origin: 'http://localhost:6274',
+      },
+      status: 415,
+      error: 'Content-Type must be application/json',
+    },
+  ];
+  for (const entry of cases) {
+    const response = await fetch(url + entry.suffix, {
+      method: entry.method,
+      headers: entry.headers,
+    });
+    assert.equal(response.status, entry.status);
+    assert.deepEqual(await response.json(), { error: entry.error });
+    assert.equal(response.headers.get('Cache-Control'), 'no-store');
+    assert.equal(response.headers.get('X-Content-Type-Options'), 'nosniff');
+    if (entry.status === 405)
+      assert.equal(response.headers.get('Allow'), 'POST, OPTIONS');
+    if (entry.status === 415)
+      assert.equal(
+        response.headers.get('Access-Control-Allow-Origin'),
+        'http://localhost:6274',
+      );
+  }
+  const preflight = await fetch(url, {
+    method: 'OPTIONS',
+    headers: { Origin: 'http://localhost:6274' },
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(
+    preflight.headers.get('Access-Control-Allow-Methods'),
+    'POST, OPTIONS',
+  );
+  assert.equal(
+    preflight.headers.get('Access-Control-Allow-Headers'),
+    'Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id',
+  );
+  assert.equal(
+    preflight.headers.get('Access-Control-Expose-Headers'),
+    'MCP-Session-Id',
+  );
+  assert.equal(preflight.headers.get('Vary'), 'Origin');
+});
