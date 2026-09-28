@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "typescript-refactor": {
+      "source": "pproenca/dot-skills",
+      "sourceType": "github",
+      "skillPath": "skills/.experimental/typescript-refactor/SKILL.md",
+      "computedHash": "405efa302763cafda33d182e435520621eab22ba2ed6f904b89b1fe2904eaf70"
+    }
+  }
+}
