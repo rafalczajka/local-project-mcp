@@ -1,7 +1,22 @@
+import type { Server } from 'node:http';
 import { loadConfig } from './config.js';
 import { createHttpServer } from './http.js';
 
-async function main() {
+const SHUTDOWN_GRACE_MS = 1500;
+
+function registerShutdownHandlers(server: Server, timeoutMs: number): void {
+  const shutdown = () => {
+    server.close();
+    const timer = setTimeout(() => {
+      server.closeAllConnections();
+    }, timeoutMs + SHUTDOWN_GRACE_MS);
+    timer.unref();
+  };
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
+}
+
+async function main(): Promise<void> {
   const config = await loadConfig();
   const server = createHttpServer(config);
   server.on('error', () => {
@@ -16,15 +31,7 @@ async function main() {
       `Read-only project MCP listening at http://${host}:${config.port}/mcp`,
     );
   });
-  const shutdown = () => {
-    server.close();
-    const timer = setTimeout(() => {
-      server.closeAllConnections();
-    }, config.limits.timeoutMs + 1500);
-    timer.unref();
-  };
-  process.once('SIGINT', shutdown);
-  process.once('SIGTERM', shutdown);
+  registerShutdownHandlers(server, config.limits.timeoutMs);
 }
 main().catch(() => {
   console.error(
