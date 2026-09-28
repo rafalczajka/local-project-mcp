@@ -1,7 +1,7 @@
-import type { ToolData } from '../result-schemas.js';
 import { spawn } from 'node:child_process';
 import { lstat, opendir, realpath } from 'node:fs/promises';
 import path from 'node:path';
+import type { ToolData } from '../result-schemas.js';
 import { clip, errorCode, ProjectError } from '../errors.js';
 import { isInside } from '../security/paths.js';
 import type { FileService } from './filesystem.js';
@@ -22,6 +22,17 @@ interface GitOutput {
   truncated: boolean;
 }
 type StatusEntry = ToolData<'git_status'>['entries'][number];
+type GitCommit = ToolData<'git_log'>['commits'][number];
+
+interface DiffRequest {
+  readonly path?: string;
+  readonly staged?: boolean;
+}
+
+interface LogRequest {
+  readonly path?: string;
+  readonly limit?: number;
+}
 
 function gitEnvironment(binary: string): NodeJS.ProcessEnv {
   const nullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null';
@@ -97,6 +108,27 @@ function parseIndex(text: string): GitIndex {
     if (record.startsWith('160000 ')) submodules.add(file);
   }
   return { tracked, submodules };
+}
+
+function parseCommits(text: string): GitCommit[] {
+  const fields = completeRecords(text);
+  const commits: GitCommit[] = [];
+  for (let i = 0; i + 3 < fields.length; i += 4) {
+    const hash = fields[i];
+    const author = fields[i + 1];
+    const date = fields[i + 2];
+    const subject = fields[i + 3];
+    if (
+      hash === undefined ||
+      author === undefined ||
+      date === undefined ||
+      subject === undefined
+    )
+      break;
+    commits.push({ hash, author, date, subject });
+  }
+
+  return commits;
 }
 
 function* changedFiles(text: string) {
@@ -274,9 +306,9 @@ export class GitService {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       const chunks: Buffer[] = [];
-      let size = 0,
-        truncated = false,
-        timedOut = false;
+      let size = 0;
+      let truncated = false;
+      let timedOut = false;
       const stop = () => {
         timedOut = true;
         child.kill('SIGKILL');
@@ -401,9 +433,7 @@ export class GitService {
     );
   }
 
-  async diff(
-    input: Readonly<{ path?: string; staged?: boolean }>,
-  ): Promise<ToolData<'git_diff'>> {
+  async diff(input: DiffRequest): Promise<ToolData<'git_diff'>> {
     const scope = await this.pathspec(input.path);
     await this.prepare();
     const base = [
@@ -415,9 +445,9 @@ export class GitService {
       '--ignore-submodules=all',
     ];
     const changed = await this.run([...base, '--raw', '-z', '--', scope]);
-    let text = '',
-      omitted = 0,
-      truncated = changed.truncated;
+    let text = '';
+    let omitted = 0;
+    let truncated = changed.truncated;
     for (const change of changedFiles(changed.text)) {
       const file = change.path;
       if (!change.regular || !(await this.allowed(file))) {
@@ -448,9 +478,7 @@ export class GitService {
     }
     return { text, staged: input.staged ?? false, omitted, truncated };
   }
-  async log(
-    input: Readonly<{ path?: string; limit?: number }>,
-  ): Promise<ToolData<'git_log'>> {
+  async log(input: LogRequest): Promise<ToolData<'git_log'>> {
     const scope = await this.pathspec(input.path);
     await this.prepare();
     // No --follow: that could traverse a denied historical filename.
@@ -464,22 +492,6 @@ export class GitService {
       '--',
       scope,
     ]);
-    const fields = completeRecords(result.text);
-    const commits: ToolData<'git_log'>['commits'] = [];
-    for (let i = 0; i + 3 < fields.length; i += 4) {
-      const hash = fields[i];
-      const author = fields[i + 1];
-      const date = fields[i + 2];
-      const subject = fields[i + 3];
-      if (
-        hash === undefined ||
-        author === undefined ||
-        date === undefined ||
-        subject === undefined
-      )
-        break;
-      commits.push({ hash, author, date, subject });
-    }
-    return { commits, truncated: result.truncated };
+    return { commits: parseCommits(result.text), truncated: result.truncated };
   }
 }

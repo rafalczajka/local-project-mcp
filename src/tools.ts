@@ -49,9 +49,11 @@ const RESPONSE_OVERHEAD_BYTES = 128;
 
 type ToolResult =
   { ok: true; data: ToolData<ToolName> } | { ok: false; error: SafeError };
+type ToolArguments<Shape extends z.ZodRawShape> = z.output<z.ZodObject<Shape>>;
+
 type ToolAction<T extends z.ZodRawShape, Name extends ToolName = ToolName> = (
   fs: FileService,
-  args: z.output<z.ZodObject<T>>,
+  args: ToolArguments<T>,
 ) => Promise<ToolData<Name>>;
 
 function formatToolResponse(result: ToolResult) {
@@ -78,7 +80,7 @@ function assertOutputLimit(result: ToolResult, maxBytes: number): void {
 async function executeTool<T extends z.ZodRawShape>(
   config: Config,
   action: ToolAction<T>,
-  args: z.output<z.ZodObject<T>>,
+  args: ToolArguments<T>,
   signal?: AbortSignal,
 ) {
   let result: ToolResult;
@@ -133,8 +135,7 @@ export function createMcpServer(
       },
       // The SDK supports Zod 3 and 4 through conditional types; it has already
       // validated these arguments against this exact Zod 4 object schema.
-      (args) =>
-        executeTool(config, action, args as z.output<z.ZodObject<T>>, signal),
+      (args) => executeTool(config, action, args as ToolArguments<T>, signal),
     );
   }
   register(

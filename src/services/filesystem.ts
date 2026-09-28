@@ -23,11 +23,23 @@ export function decodeText(data: Buffer): string {
     );
   }
 }
-export type FileRequest = {
-  path: string;
-  startLine?: number;
-  endLine?: number;
-};
+export interface FileRequest {
+  readonly path: string;
+  readonly startLine?: number;
+  readonly endLine?: number;
+}
+
+interface TreeRequest {
+  readonly path?: string;
+  readonly depth?: number;
+  readonly includeHidden?: boolean;
+}
+
+interface FindRequest {
+  readonly pattern: string;
+  readonly path?: string;
+  readonly maxResults?: number;
+}
 export type Entry = ToolData<'project_tree'>['entries'][number];
 
 type WalkSummary = Pick<ToolData<'project_tree'>, 'truncated' | 'omitted'>;
@@ -37,7 +49,7 @@ type EntryVisitor = (entry: Entry) => Promise<boolean | 'skip'>;
 
 function formatLineRange(
   source: string,
-  input: Readonly<FileRequest>,
+  input: FileRequest,
   maxBytes: number,
   budget: Budget,
 ) {
@@ -88,7 +100,7 @@ export class FileService {
     return decodeText(buffer);
   }
   async readFile(
-    input: Readonly<FileRequest>,
+    input: FileRequest,
     maxBytes = this.config.limits.readBytes,
   ): Promise<ToolData<'read_file'>> {
     if ((input.endLine ?? Infinity) < (input.startLine ?? 1))
@@ -101,7 +113,7 @@ export class FileService {
     return { path: (await this.paths.resolve(input.path)).relative, ...result };
   }
   async readFiles(
-    files: readonly Readonly<FileRequest>[],
+    files: readonly FileRequest[],
   ): Promise<ToolData<'read_files'>> {
     let remaining = this.config.limits.batchBytes;
     const results: ToolData<'read_files'>['files'] = [];
@@ -188,7 +200,8 @@ export class FileService {
         for await (const child of directory) {
           this.budget.check();
           if (++this.budget.visited > this.config.limits.scanEntries) {
-            truncated = stopped = true;
+            truncated = true;
+            stopped = true;
             break;
           }
           const childPath =
@@ -207,7 +220,8 @@ export class FileService {
             depth,
           });
           if (decision === false) {
-            truncated = stopped = true;
+            truncated = true;
+            stopped = true;
             break;
           }
           if (child.isDirectory() && decision !== 'skip') {
@@ -230,11 +244,7 @@ export class FileService {
       );
     return { truncated, omitted };
   }
-  async tree(input: {
-    path?: string;
-    depth?: number;
-    includeHidden?: boolean;
-  }): Promise<ToolData<'project_tree'>> {
+  async tree(input: TreeRequest): Promise<ToolData<'project_tree'>> {
     const entries: Entry[] = [];
     const depth = input.depth ?? Math.min(2, this.config.limits.treeDepth);
     const summary = await this.walk(
@@ -254,11 +264,7 @@ export class FileService {
       limits: { entries: this.config.limits.treeEntries, depth },
     };
   }
-  async find(input: {
-    pattern: string;
-    path?: string;
-    maxResults?: number;
-  }): Promise<ToolData<'find_files'>> {
+  async find(input: FindRequest): Promise<ToolData<'find_files'>> {
     const files: string[] = [];
     const summary = await this.walk(
       input.path ?? '.',
