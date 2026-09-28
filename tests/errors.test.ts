@@ -1,6 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Budget, clip, ProjectError, safeError } from '../src/errors.js';
+import {
+  Budget,
+  clip,
+  errorCode,
+  ProjectError,
+  safeError,
+} from '../src/errors.js';
+
+test('error codes are narrowed without assuming thrown values are Error instances', () => {
+  for (const value of [null, undefined, 42, 'ENOENT', {}, { code: 1 }]) {
+    assert.equal(errorCode(value), undefined);
+  }
+  assert.equal(errorCode(new ProjectError('TIMEOUT', 'deadline')), 'TIMEOUT');
+  assert.equal(errorCode({ code: 'ENOENT' }), 'ENOENT');
+  assert.equal(
+    errorCode(Object.assign(() => undefined, { code: 'EPERM' })),
+    'EPERM',
+  );
+});
 
 test('safe errors preserve explicit project errors and sanitize filesystem errors', () => {
   assert.deepEqual(safeError(new ProjectError('ENOENT', 'Public message')), {

@@ -2,7 +2,6 @@ import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { request } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createHttpServer } from '../src/http.js';
@@ -17,7 +16,9 @@ async function listen(t: TestContext, config: Config) {
     server.closeAllConnections();
     server.close();
   });
-  return `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`;
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  return `http://127.0.0.1:${address.port}/mcp`;
 }
 
 test('MCP HTTP initialization, nine read-only tools, schemas and representative calls', async (t) => {
@@ -66,7 +67,9 @@ test('MCP HTTP initialization, nine read-only tools, schemas and representative 
   for (const [name, args] of cases) {
     const result = await client.callTool({ name, arguments: args });
     assert.equal(result.isError, false, `${name}: ${JSON.stringify(result)}`);
-    assert.equal((result.structuredContent as { ok: boolean }).ok, true);
+    const content = result.structuredContent;
+    assert.ok(content && typeof content === 'object' && 'ok' in content);
+    assert.equal(content.ok, true);
   }
   for (const args of [
     { path: '../secret' },
@@ -186,10 +189,14 @@ test('serialized output cap returns a structured error, not an unbounded respons
     arguments: { path: 'large' },
   });
   assert.equal(result.isError, true);
-  assert.equal(
-    (result.structuredContent as { error: { code: string } }).error.code,
-    'OUTPUT_LIMIT',
-  );
+  assert.deepEqual(result.structuredContent, {
+    ok: false,
+    error: {
+      code: 'OUTPUT_LIMIT',
+      message:
+        'Serialized result exceeds the output limit; narrow the request.',
+    },
+  });
 });
 
 test('HTTP guards preserve rejection order and headers before MCP handling', async (t) => {

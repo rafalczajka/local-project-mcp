@@ -52,9 +52,9 @@ test('batch reads have independent errors and combined byte limits', async (t) =
     { path: 'two' },
   ]);
   assert.equal(result.files.length, 4);
-  assert.equal(result.files[0]!.ok, false);
-  assert.equal(result.files[2]!.ok, true);
-  assert.equal(result.files[3]!.ok, false);
+  assert.equal(result.files[0]?.ok, false);
+  assert.equal(result.files[2]?.ok, true);
+  assert.equal(result.files[3]?.ok, false);
   assert.equal(result.truncated, true);
 });
 
@@ -121,7 +121,7 @@ test('search literal, regex, case, glob, limits, sensitive and binary omissions'
         regex: true,
         caseSensitive: true,
       })
-    ).matches[0]!.line,
+    ).matches[0]?.line,
     2,
   );
   const limited = await search({ query: 'UserSession', maxResults: 1 });

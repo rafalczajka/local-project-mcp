@@ -1,7 +1,8 @@
+import type { ToolData } from '../result-schemas.js';
 import { spawn } from 'node:child_process';
 import { lstat, opendir, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import { clip, ProjectError } from '../errors.js';
+import { clip, errorCode, ProjectError } from '../errors.js';
 import { isInside } from '../security/paths.js';
 import type { FileService } from './filesystem.js';
 
@@ -20,10 +21,7 @@ interface GitOutput {
   text: string;
   truncated: boolean;
 }
-interface StatusEntry {
-  path: string;
-  status: string;
-}
+type StatusEntry = ToolData<'git_status'>['entries'][number];
 
 function gitEnvironment(binary: string): NodeJS.ProcessEnv {
   const nullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null';
@@ -104,10 +102,13 @@ function parseIndex(text: string): GitIndex {
 function* changedFiles(text: string) {
   const records = completeRecords(text);
   for (let i = 0; i + 1 < records.length; i += 2) {
-    const fields = records[i]!.split(' ');
+    const record = records[i];
+    const file = records[i + 1];
+    if (record === undefined || file === undefined) break;
+    const fields = record.split(' ');
     const modes = [fields[0]?.slice(1), fields[1]];
     yield {
-      path: records[i + 1]!,
+      path: file,
       regular: modes.every(
         (mode) => mode === '000000' || mode === '100644' || mode === '100755',
       ),
@@ -136,21 +137,21 @@ const configKeys: Record<string, string[]> = {
   remote: ['url', 'pushurl', 'fetch'],
   branch: ['remote', 'merge', 'vscode-merge-base'],
 };
-export function validateGitConfig(source: string) {
+export function validateGitConfig(source: string): void {
   let section = '';
   for (const raw of source.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || /^[#;]/.test(line)) continue;
     const header = /^\[([a-z]+)(?: "[^"\\\x00-\x1f]+")?\]$/i.exec(line);
-    if (header) {
-      section = header[1]!.toLowerCase();
+    if (header?.[1] !== undefined) {
+      section = header[1].toLowerCase();
       if (!configKeys[section]) throw unsafeRepo();
       continue;
     }
     const value = /^([a-z][a-z0-9-]*)\s*=\s*(.*)$/i.exec(line);
     if (
-      !value ||
-      !configKeys[section]?.includes(value[1]!.toLowerCase()) ||
+      value?.[1] === undefined ||
+      !configKeys[section]?.includes(value[1].toLowerCase()) ||
       /\\\s*$/.test(line)
     )
       throw unsafeRepo();
@@ -183,7 +184,7 @@ export class GitService {
     try {
       gitDirectory = await this.fs.paths.resolve('.git');
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+      if (errorCode(error) === 'ENOENT')
         throw new ProjectError(
           'NOT_GIT_REPOSITORY',
           'PROJECT_ROOT must be the top level of a Git repository.',
@@ -258,7 +259,7 @@ export class GitService {
       );
   }
   private run(
-    args: string[],
+    args: readonly string[],
     limit = this.fs.config.limits.gitBytes,
   ): Promise<GitOutput> {
     this.fs.budget.check();
@@ -319,7 +320,7 @@ export class GitService {
       });
     });
   }
-  private async allowed(file: string) {
+  private async allowed(file: string): Promise<boolean> {
     try {
       await this.fs.policy.resolve(file, true);
       await this.fs.policy.assert(file, false);
@@ -328,7 +329,7 @@ export class GitService {
       return false;
     }
   }
-  private async pathspec(input?: string) {
+  private async pathspec(input?: string): Promise<string> {
     if (!input) return '.';
     const value = await this.fs.policy.resolve(input, true);
     try {
@@ -337,11 +338,11 @@ export class GitService {
         (await lstat(value.absolute)).isDirectory(),
       );
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      if (errorCode(error) !== 'ENOENT') throw error;
     }
     return value.relative;
   }
-  async status() {
+  async status(): Promise<ToolData<'git_status'>> {
     await this.prepare();
     const result = await this.run([
       'status',
@@ -365,7 +366,9 @@ export class GitService {
     return status;
   }
 
-  private async filterTrackedStatus(result: GitOutput) {
+  private async filterTrackedStatus(
+    result: GitOutput,
+  ): Promise<ToolData<'git_status'>> {
     const entries: StatusEntry[] = [];
     let omitted = 0;
     for (const record of completeRecords(result.text)) {
@@ -398,7 +401,9 @@ export class GitService {
     );
   }
 
-  async diff(input: { path?: string; staged?: boolean }) {
+  async diff(
+    input: Readonly<{ path?: string; staged?: boolean }>,
+  ): Promise<ToolData<'git_diff'>> {
     const scope = await this.pathspec(input.path);
     await this.prepare();
     const base = [
@@ -443,7 +448,9 @@ export class GitService {
     }
     return { text, staged: input.staged ?? false, omitted, truncated };
   }
-  async log(input: { path?: string; limit?: number }) {
+  async log(
+    input: Readonly<{ path?: string; limit?: number }>,
+  ): Promise<ToolData<'git_log'>> {
     const scope = await this.pathspec(input.path);
     await this.prepare();
     // No --follow: that could traverse a denied historical filename.
@@ -458,14 +465,21 @@ export class GitService {
       scope,
     ]);
     const fields = completeRecords(result.text);
-    const commits = [];
-    for (let i = 0; i + 3 < fields.length; i += 4)
-      commits.push({
-        hash: fields[i]!,
-        author: fields[i + 1]!,
-        date: fields[i + 2]!,
-        subject: fields[i + 3]!,
-      });
+    const commits: ToolData<'git_log'>['commits'] = [];
+    for (let i = 0; i + 3 < fields.length; i += 4) {
+      const hash = fields[i];
+      const author = fields[i + 1];
+      const date = fields[i + 2];
+      const subject = fields[i + 3];
+      if (
+        hash === undefined ||
+        author === undefined ||
+        date === undefined ||
+        subject === undefined
+      )
+        break;
+      commits.push({ hash, author, date, subject });
+    }
     return { commits, truncated: result.truncated };
   }
 }

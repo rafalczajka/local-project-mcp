@@ -30,7 +30,8 @@ test('search excerpts retain leading context and clip UTF-8 without replacement 
     query: 'needle',
     path: 'source',
   });
-  const match = result.matches[0]!;
+  const match = result.matches[0];
+  assert.ok(match);
   assert.equal(match.line, 1);
   assert.ok(match.excerpt.startsWith('x'.repeat(100) + 'needle'));
   assert.ok(Buffer.byteLength(match.excerpt) <= 500);

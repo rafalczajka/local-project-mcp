@@ -2,6 +2,7 @@ import {
   createServer,
   type IncomingMessage,
   type ServerResponse,
+  type Server,
 } from 'node:http';
 import { timingSafeEqual, createHash } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -34,7 +35,7 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
     if (length > MAX_BODY_BYTES) throw new Error('BODY_LIMIT');
     chunks.push(chunk);
   }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
 function respondToRequestError(res: ServerResponse, error: unknown): void {
@@ -128,7 +129,7 @@ function acceptMcpRequest(
   return true;
 }
 
-export function createHttpServer(config: Config) {
+export function createHttpServer(config: Config): Server {
   let active = 0;
   let tokens = REQUEST_BURST;
   let updated = Date.now();

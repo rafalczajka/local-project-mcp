@@ -40,7 +40,7 @@ const gitCommitSchema = z.object({
 });
 
 // Advertise tool-specific shapes so clients can validate and consume results reliably.
-export const resultSchemas: Record<string, z.ZodType> = {
+export const resultSchemas = {
   project_tree: z.object({
     path: z.string(),
     entries: z.array(treeEntrySchema),
@@ -82,4 +82,9 @@ export const resultSchemas: Record<string, z.ZodType> = {
     commits: z.array(gitCommitSchema),
     truncated: z.boolean(),
   }),
-};
+} satisfies Record<string, z.ZodType>;
+
+export type ToolName = keyof typeof resultSchemas;
+export type ToolData<Name extends ToolName> = z.output<
+  (typeof resultSchemas)[Name]
+>;

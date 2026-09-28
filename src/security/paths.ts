@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { constants, type Stats } from 'node:fs';
 import { lstat, realpath, open, type FileHandle } from 'node:fs/promises';
-import { ProjectError } from '../errors.js';
+import { errorCode, ProjectError } from '../errors.js';
 
 const MAX_INPUT_LENGTH = 1024;
 
@@ -83,9 +83,14 @@ async function readBounded(
   return data.subarray(0, length);
 }
 
+export interface ResolvedPath {
+  relative: string;
+  absolute: string;
+}
+
 export class Paths {
   constructor(public readonly root: string) {}
-  async resolve(input: string, allowMissing = false) {
+  async resolve(input: string, allowMissing = false): Promise<ResolvedPath> {
     const relative = normalizeInput(input);
     const absolute = path.resolve(this.root, relative);
     if (!isInside(this.root, absolute))
@@ -102,8 +107,7 @@ export class Paths {
       try {
         await this.assertSafeComponent(current);
       } catch (error) {
-        if (allowMissing && (error as NodeJS.ErrnoException).code === 'ENOENT')
-          break;
+        if (allowMissing && errorCode(error) === 'ENOENT') break;
         throw error;
       }
     }

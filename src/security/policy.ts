@@ -1,8 +1,8 @@
 import ignore, { type Ignore } from 'ignore';
 import { minimatch } from 'minimatch';
 import type { Config } from '../config.js';
-import { ProjectError } from '../errors.js';
-import { Paths, normalizeInput } from './paths.js';
+import { errorCode, ProjectError } from '../errors.js';
+import { Paths, normalizeInput, type ResolvedPath } from './paths.js';
 
 const MAX_GITIGNORE_BYTES = 64 * 1024;
 
@@ -70,7 +70,7 @@ export class Policy {
         ).toString('utf8'),
       );
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      if (errorCode(error) !== 'ENOENT') throw error;
     }
     this.gitignores.set(directory, matcher);
     return matcher;
@@ -114,7 +114,7 @@ export class Policy {
   }
 
   private async isGitignored(
-    parts: string[],
+    parts: readonly string[],
     directory: boolean,
   ): Promise<boolean> {
     let ignored = false;
@@ -128,7 +128,7 @@ export class Policy {
     return ignored;
   }
 
-  async resolve(input: string, allowMissing = false) {
+  async resolve(input: string, allowMissing = false): Promise<ResolvedPath> {
     // Policy is evaluated before stat to avoid probing sensitive names.
     await this.assert(input);
     return this.paths.resolve(input, allowMissing);

@@ -2,8 +2,9 @@ import type { Dirent } from 'node:fs';
 import { lstat, opendir } from 'node:fs/promises';
 import path from 'node:path';
 import { minimatch } from 'minimatch';
+import type { ToolData } from '../result-schemas.js';
 import type { Config } from '../config.js';
-import { Budget, clip, ProjectError, safeError } from '../errors.js';
+import { Budget, clip, errorCode, ProjectError, safeError } from '../errors.js';
 import { Paths } from '../security/paths.js';
 import { Policy } from '../security/policy.js';
 
@@ -27,14 +28,16 @@ export type FileRequest = {
   startLine?: number;
   endLine?: number;
 };
-export type Entry = { path: string; type: 'directory' | 'file'; depth: number };
+export type Entry = ToolData<'project_tree'>['entries'][number];
+
+type WalkSummary = Pick<ToolData<'project_tree'>, 'truncated' | 'omitted'>;
 
 type WalkOptions = { depth: number; includeHidden: boolean };
 type EntryVisitor = (entry: Entry) => Promise<boolean | 'skip'>;
 
 function formatLineRange(
   source: string,
-  input: FileRequest,
+  input: Readonly<FileRequest>,
   maxBytes: number,
   budget: Budget,
 ) {
@@ -77,14 +80,17 @@ export class FileService {
     this.paths = new Paths(config.root);
     this.policy = new Policy(config, this.paths);
   }
-  async text(input: string) {
+  async text(input: string): Promise<string> {
     this.budget.check();
     await this.policy.assert(input);
     const buffer = await this.paths.read(input, this.config.limits.fileBytes);
     this.budget.check();
     return decodeText(buffer);
   }
-  async readFile(input: FileRequest, maxBytes = this.config.limits.readBytes) {
+  async readFile(
+    input: Readonly<FileRequest>,
+    maxBytes = this.config.limits.readBytes,
+  ): Promise<ToolData<'read_file'>> {
     if ((input.endLine ?? Infinity) < (input.startLine ?? 1))
       throw new ProjectError(
         'INVALID_RANGE',
@@ -94,9 +100,11 @@ export class FileService {
     const result = formatLineRange(source, input, maxBytes, this.budget);
     return { path: (await this.paths.resolve(input.path)).relative, ...result };
   }
-  async readFiles(files: FileRequest[]) {
+  async readFiles(
+    files: readonly Readonly<FileRequest>[],
+  ): Promise<ToolData<'read_files'>> {
     let remaining = this.config.limits.batchBytes;
-    const results = [];
+    const results: ToolData<'read_files'>['files'] = [];
     for (const file of files) {
       try {
         if (remaining <= 0)
@@ -116,12 +124,10 @@ export class FileService {
     }
     return {
       files: results,
-      truncated: results.some(
-        (r) => !r.ok || ('truncated' in r && r.truncated),
-      ),
+      truncated: results.some((result) => !result.ok || result.truncated),
     };
   }
-  async info(input: string) {
+  async info(input: string): Promise<ToolData<'file_info'>> {
     const { target, stat: info } = await this.inspectPath(input);
     let binary: boolean | null = null;
     if (info.isFile() && info.size <= this.config.limits.fileBytes) {
@@ -157,9 +163,7 @@ export class FileService {
     } catch (error) {
       if (
         error instanceof ProjectError ||
-        ['ENOENT', 'EACCES', 'EPERM'].includes(
-          (error as NodeJS.ErrnoException).code ?? '',
-        )
+        ['ENOENT', 'EACCES', 'EPERM'].includes(errorCode(error) ?? '')
       )
         return false;
       throw error;
@@ -167,7 +171,11 @@ export class FileService {
     return child.isFile() || child.isDirectory();
   }
 
-  async walk(input: string, options: WalkOptions, visit: EntryVisitor) {
+  async walk(
+    input: string,
+    options: Readonly<WalkOptions>,
+    visit: EntryVisitor,
+  ): Promise<WalkSummary> {
     const { target, stat } = await this.inspectPath(input);
     let truncated = false;
     let omitted = 0;
@@ -226,7 +234,7 @@ export class FileService {
     path?: string;
     depth?: number;
     includeHidden?: boolean;
-  }) {
+  }): Promise<ToolData<'project_tree'>> {
     const entries: Entry[] = [];
     const depth = input.depth ?? Math.min(2, this.config.limits.treeDepth);
     const summary = await this.walk(
@@ -246,7 +254,11 @@ export class FileService {
       limits: { entries: this.config.limits.treeEntries, depth },
     };
   }
-  async find(input: { pattern: string; path?: string; maxResults?: number }) {
+  async find(input: {
+    pattern: string;
+    path?: string;
+    maxResults?: number;
+  }): Promise<ToolData<'find_files'>> {
     const files: string[] = [];
     const summary = await this.walk(
       input.path ?? '.',

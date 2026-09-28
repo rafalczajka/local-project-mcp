@@ -18,20 +18,34 @@ export const defaultLimits = {
   concurrency: 4,
 };
 export type Limits = typeof defaultLimits;
+const positiveLimit = z
+  .number()
+  .int()
+  .min(1)
+  .max(1024 * 1024 * 1024)
+  .optional();
+const outputByteLimit = z
+  .number()
+  .int()
+  .min(1024)
+  .max(1024 * 1024 * 1024)
+  .optional();
 const limitSchema = z
-  .object(
-    Object.fromEntries(
-      Object.keys(defaultLimits).map((key) => [
-        key,
-        z
-          .number()
-          .int()
-          .min(key === 'outputBytes' ? 1024 : 1)
-          .max(1024 * 1024 * 1024)
-          .optional(),
-      ]),
-    ),
-  )
+  .object({
+    fileBytes: positiveLimit,
+    readBytes: positiveLimit,
+    batchBytes: positiveLimit,
+    batchFiles: positiveLimit,
+    searchResults: positiveLimit,
+    treeEntries: positiveLimit,
+    treeDepth: positiveLimit,
+    gitBytes: positiveLimit,
+    timeoutMs: positiveLimit,
+    scanEntries: positiveLimit,
+    scanBytes: positiveLimit,
+    outputBytes: outputByteLimit,
+    concurrency: positiveLimit,
+  } satisfies Record<keyof Limits, z.ZodOptional<z.ZodNumber>>)
   .strict();
 const configSchema = z
   .object({
@@ -75,8 +89,10 @@ async function resolveProjectRoot(input: string | undefined): Promise<string> {
   return root;
 }
 
-async function loadSettings(file: string | undefined) {
-  const input = file ? JSON.parse(await readFile(file, 'utf8')) : {};
+async function loadSettings(
+  file: string | undefined,
+): Promise<z.output<typeof configSchema>> {
+  const input: unknown = file ? JSON.parse(await readFile(file, 'utf8')) : {};
   return configSchema.parse(input);
 }
 
@@ -116,6 +132,6 @@ export async function loadConfig(
     token,
     ...settings,
     ignore: settings.ignore ?? defaultIgnores,
-    limits: { ...defaultLimits, ...settings.limits } as Limits,
+    limits: { ...defaultLimits, ...settings.limits },
   };
 }

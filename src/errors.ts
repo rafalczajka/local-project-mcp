@@ -7,15 +7,27 @@ export class ProjectError extends Error {
   }
 }
 
-interface SafeError {
+export interface SafeError {
   code: string;
   message: string;
+}
+
+export function errorCode(error: unknown): string | undefined {
+  if (
+    error !== null &&
+    (typeof error === 'object' || typeof error === 'function') &&
+    'code' in error
+  ) {
+    const code = error.code;
+    if (typeof code === 'string') return code;
+  }
+  return undefined;
 }
 
 export function safeError(error: unknown): SafeError {
   if (error instanceof ProjectError)
     return { code: error.code, message: error.message };
-  const code = (error as { code?: unknown } | null | undefined)?.code;
+  const code = errorCode(error);
   switch (code) {
     case 'ENOENT':
     case 'ENOTDIR':

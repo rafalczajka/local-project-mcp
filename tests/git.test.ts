@@ -32,7 +32,7 @@ test('Git status, working/staged diffs, log, deletions and sensitive filtering a
   );
   const log = await service().log({ limit: 1 });
   assert.equal(log.commits.length, 1);
-  assert.equal(log.commits[0]!.subject, 'Initial source');
+  assert.equal(log.commits[0]?.subject, 'Initial source');
   assert.deepEqual(await readFile(path.join(root, '.git/index')), before);
   await assert.rejects(service().diff({ path: '.env' }), {
     code: 'SENSITIVE_PATH',

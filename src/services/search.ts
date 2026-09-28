@@ -1,3 +1,4 @@
+import type { ToolData } from '../result-schemas.js';
 import { RE2 } from 're2-wasm';
 import { minimatch } from 'minimatch';
 import { clip, ProjectError, safeError } from '../errors.js';
@@ -16,14 +17,11 @@ interface SearchInput {
   maxResults?: number;
 }
 
-interface SearchMatch {
-  path: string;
-  line: number;
-  excerpt: string;
-  excerptTruncated: boolean;
-}
+type SearchMatch = ToolData<'search_text'>['matches'][number];
 
-function createLineMatcher(input: SearchInput): (line: string) => number {
+function createLineMatcher(
+  input: Readonly<SearchInput>,
+): (line: string) => number {
   if (input.regex) {
     try {
       const regex = new RE2(input.query, input.caseSensitive ? 'u' : 'iu');
@@ -58,7 +56,10 @@ function createMatch(
   };
 }
 
-export async function searchText(fs: FileService, input: SearchInput) {
+export async function searchText(
+  fs: FileService,
+  input: Readonly<SearchInput>,
+): Promise<ToolData<'search_text'>> {
   const findIndex = createLineMatcher(input);
   const matches: SearchMatch[] = [];
   const skipped: Record<string, number> = {};
@@ -88,9 +89,8 @@ export async function searchText(fs: FileService, input: SearchInput) {
         return false;
       }
       const lines = source.split(/\r?\n/);
-      for (let i = 0; i < lines.length; i++) {
+      for (const [i, line] of lines.entries()) {
         fs.budget.check();
-        const line = lines[i]!;
         const index = findIndex(line);
         if (index < 0) continue;
         if (

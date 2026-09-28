@@ -4,6 +4,25 @@ import path from 'node:path';
 import { defaultIgnores, defaultLimits, loadConfig } from '../src/config.js';
 import { fixture } from './helpers.js';
 
+test('every configured limit keeps its integer bounds and merges with defaults', async (t) => {
+  const { root, put } = await fixture(t);
+  const args = ['--root', root, '--config', path.join(root, 'settings.json')];
+  for (const key of Object.keys(defaultLimits)) {
+    const minimum = key === 'outputBytes' ? 1024 : 1;
+    for (const value of [minimum, 1024 * 1024 * 1024]) {
+      await put('settings.json', JSON.stringify({ limits: { [key]: value } }));
+      assert.deepEqual((await loadConfig(args, {})).limits, {
+        ...defaultLimits,
+        [key]: value,
+      });
+    }
+    for (const value of [minimum - 1, minimum + 0.5, 1024 * 1024 * 1024 + 1]) {
+      await put('settings.json', JSON.stringify({ limits: { [key]: value } }));
+      await assert.rejects(loadConfig(args, {}), { name: 'ZodError' });
+    }
+  }
+});
+
 test('CLI overrides environment values and omitted settings retain defaults', async (t) => {
   const { root } = await fixture(t);
   const config = await loadConfig(
