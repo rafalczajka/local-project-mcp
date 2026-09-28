@@ -7,7 +7,7 @@
 - `src/security/` centralizes path containment and filtering. `src/services/` implements filesystem, search, and Git inspection.
 - `src/config.ts` owns configuration and limits; `src/errors.ts` provides sanitized errors and operation budgets.
 - `tests/` contains service, security, and HTTP integration tests, with shared fixtures in `helpers.ts`.
-- `dist/` is generated and ignored. There are no UI assets. Read `README.md`, `DESIGN.md`, and `VALIDATION.md` for behavior, decisions, and verification limits.
+- `dist/` is generated and ignored. There are no UI assets. Read `README.md` and `DESIGN.md` for behavior, decisions, and verification limits.
 
 ## Build, Test, and Development Commands
 
