@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Read-only MCP server for secure access to local project files",
   "engines": {
-    "node": ">=24 <25"
+    "node": ">=24"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

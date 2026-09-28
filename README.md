@@ -6,7 +6,7 @@ A local-first, read-only MCP server for discussing one software project with Cha
 
 ## Requirements and quick start
 
-- [Node.js 24 LTS](https://nodejs.org/en/about/previous-releases), with npm.
+- Node.js 24 or newer.
 - Git on `PATH` for Git tools; filesystem/search tools work without Git.
 - No ripgrep installation required. Bounded traversal and RE2 WebAssembly provide search without shell execution or backtracking regex denial of service.
 

@@ -11,7 +11,7 @@
 
 ## Build, Test, and Development Commands
 
-Use Node.js 24 LTS and install Git for Git tests/tools.
+Use Node.js 24 (or newer) and install Git for Git tests/tools.
 
 - `npm ci`: install locked dependencies.
 - `npm run dev -- --root "C:\Projects\my-app"`: run TypeScript directly.
