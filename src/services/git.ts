@@ -166,7 +166,8 @@ const configKeys: Record<string, string[]> = {
     'eol',
     'safecrlf',
     'quotepath',
-    'longpaths'
+    'longpaths',
+    'hookspath'
   ],
   user: ['name', 'email', 'signingkey'],
   remote: ['url', 'pushurl', 'fetch'],
