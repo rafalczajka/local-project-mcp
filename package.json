@@ -17,15 +17,15 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "ignore": "7.0.12",
     "minimatch": "10.2.6",
     "re2-wasm": "1.0.2",
     "zod": "4.6.5"
   },
   "devDependencies": {
-    "@types/node": "26.6.4",
-    "prettier": "3.9.9",
+    "@types/node": "26.6.5",
+    "prettier": "3.9.10",
     "tsx": "4.23.15",
     "typescript": "7.0.2"
   }
