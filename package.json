@@ -19,7 +19,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
     "ignore": "7.0.14",
-    "minimatch": "10.2.6",
+    "minimatch": "11.0.3",
     "re2-wasm": "1.0.2",
     "zod": "4.6.7"
   },
